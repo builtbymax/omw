@@ -8,6 +8,8 @@
 	<string>omw</string>
 	<key>CFBundleExecutable</key>
 	<string>omw</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.builtbymax.omw</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -27,6 +29,13 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/builtbymax/omw/releases/latest/download/appcast.xml</string>
+	<!-- Output of Sparkle's generate_keys. The updater stays off while this is empty. -->
+	<key>SUPublicEDKey</key>
+	<string>2ADMRn2lAL3dzpYq9I41yDfWQ0v2Eb7kHI5ZK6J3Ing=</string>
+	<key>SUEnableAutomaticChecks</key>
 	<true/>
 </dict>
 </plist>

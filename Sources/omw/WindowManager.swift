@@ -6,27 +6,50 @@ final class WindowManager {
     private let store: ConfigStore
     /// The layout last applied on each display, used to know the columns when moving windows.
     private var activeLayouts: [CGDirectDisplayID: UUID] = [:]
+    /// Frames from before the last arrange, so it can be undone.
+    private var undoState: (moves: [(window: ManagedWindow, frame: CGRect)], displayID: CGDirectDisplayID, layoutID: UUID?)?
+    private let animator = FrameAnimator()
+
+    /// Called after a layout was applied with the number of windows that were arranged.
+    var onArranged: ((Layout, Int, NSScreen) -> Void)?
 
     init(store: ConfigStore) {
         self.store = store
     }
 
+    var canUndo: Bool { undoState != nil }
+
     func activeLayoutID(on screen: NSScreen?) -> UUID? {
         screen.flatMap { activeLayouts[$0.displayID] }
     }
 
-    func apply(_ layout: Layout) {
-        guard ensureTrusted(), let screen = AX.targetScreen() else { return }
-        let windows = AX.visibleWindows(on: screen)
+    func apply(_ layout: Layout, on target: NSScreen? = nil) {
+        guard ensureTrusted(), let screen = target ?? AX.targetScreen() else { return }
+        let windows = AX.visibleWindows(on: screen).filter { layout.arranges(appID: $0.bundleID) }
         let area = screen.axVisibleFrame
         let assignment = Arranger.assign(snapshots(windows), layout: layout, in: area, pinned: true, balanced: true)
+        undoState = (windows.map { ($0, $0.frame) }, screen.displayID, activeLayouts[screen.displayID])
         place(windows, assignment, layout: layout, area: area)
         activeLayouts[screen.displayID] = layout.id
         store.config.lastLayoutID = layout.id
+        onArranged?(layout, windows.count, screen)
     }
 
-    /// Moves the focused window one column left (-1) or right (+1), swapping it with the window that's there.
-    func moveFocused(by delta: Int) {
+    /// Puts the windows of the last arrange back where they were.
+    func undo() {
+        guard let state = undoState else { return }
+        undoState = nil
+        // The windows sit in their columns now, so the moves start from there.
+        let moves = state.moves.compactMap { move -> (ManagedWindow, CGRect)? in
+            guard let current = AX.frame(of: move.window.element) else { return nil }
+            return (move.window.with(frame: current), move.frame)
+        }
+        animator.run(moves, animated: store.config.animate)
+        activeLayouts[state.displayID] = state.layoutID
+    }
+
+    /// Moves the focused window one cell left/right (dx) or up/down (dy), swapping it with the window that's there.
+    func moveFocused(dx: Int, dy: Int) {
         guard ensureTrusted(),
               let focused = AX.focusedWindow(),
               let focusedID = AX.windowID(of: focused),
@@ -37,12 +60,64 @@ final class WindowManager {
 
         let area = screen.axVisibleFrame
         let current = Arranger.assign(snapshots(windows), layout: layout, in: area, pinned: false, balanced: false)
-        guard let next = Arranger.move(index, by: delta, in: current, columnCount: layout.columnCount) else {
+        guard let next = Arranger.move(index, dx: dx, dy: dy, in: current, layout: layout) else {
             NSSound.beep()
             return
         }
         place(windows, next, layout: layout, area: area)
         activeLayouts[screen.displayID] = layout.id
+    }
+
+    func perform(_ command: WindowCommand) {
+        switch command {
+        case .moveLeft: moveFocused(dx: -1, dy: 0)
+        case .moveRight: moveFocused(dx: 1, dy: 0)
+        case .moveUp: moveFocusedVertically(-1)
+        case .moveDown: moveFocusedVertically(1)
+        case .nextDisplay: moveFocusedToDisplay(by: 1)
+        case .previousDisplay: moveFocusedToDisplay(by: -1)
+        case .nextSpace: moveFocusedToSpace(by: 1)
+        case .previousSpace: moveFocusedToSpace(by: -1)
+        }
+    }
+
+    /// In a column with rows, the row above or below. Otherwise the top half, bottom half or full height of the column.
+    private func moveFocusedVertically(_ direction: Int) {
+        guard ensureTrusted(), let window = AX.focusedManagedWindow(), let screen = AX.screen(containing: window.frame) else { return }
+        let layout = layout(for: screen)
+        let area = screen.axVisibleFrame
+        let index = layout.nearestFilledColumn(to: Arranger.columnIndex(forX: window.frame.midX, layout: layout, in: area))
+        if layout.rowCounts[index] > 1 {
+            moveFocused(dx: 0, dy: direction)
+            return
+        }
+        let column = Arranger.columns(for: layout, in: area, gap: store.config.gap)[index]
+        let target = Arranger.verticalSlot(for: window.frame, in: column, direction: direction, gap: store.config.gap)
+        animator.run([(window, target)], animated: store.config.animate)
+    }
+
+    /// Moves the focused window to the cell at the same relative position on the display left (-1) or right (+1) of its current one.
+    private func moveFocusedToDisplay(by delta: Int) {
+        guard ensureTrusted(), let window = AX.focusedManagedWindow(), let source = AX.screen(containing: window.frame) else { return }
+        let screens = NSScreen.screens.sorted { ($0.frame.minX, $0.frame.minY) < ($1.frame.minX, $1.frame.minY) }
+        guard screens.count > 1, let index = screens.firstIndex(of: source) else {
+            NSSound.beep()
+            return
+        }
+        let target = screens[(index + delta + screens.count) % screens.count]
+        let from = source.axVisibleFrame, to = target.axVisibleFrame
+        let relativeX = from.width > 0 ? (window.frame.midX - from.minX) / from.width : 0.5
+        let relativeY = from.height > 0 ? (window.frame.midY - from.minY) / from.height : 0.5
+        let layout = layout(for: target)
+        let point = CGPoint(x: to.minX + relativeX * to.width, y: to.minY + relativeY * to.height)
+        let cell = Arranger.cellIndex(at: point, layout: layout, in: to)
+        // Across displays it jumps: gliding over the gap between screens looks broken.
+        AX.setFrame(window, to: Arranger.cells(for: layout, in: to, gap: store.config.gap)[cell])
+    }
+
+    private func moveFocusedToSpace(by delta: Int) {
+        guard ensureTrusted(), let window = AX.focusedManagedWindow() else { return }
+        SpaceMover.move(window, by: delta)
     }
 
     private func layout(for screen: NSScreen) -> Layout {
@@ -56,15 +131,68 @@ final class WindowManager {
     }
 
     private func place(_ windows: [ManagedWindow], _ assignment: [Int], layout: Layout, area: CGRect) {
-        let columns = Arranger.columns(for: layout, in: area, gap: store.config.gap)
-        for (window, column) in zip(windows, assignment) {
-            AX.setFrame(window, to: columns[column])
-        }
+        let cells = Arranger.cells(for: layout, in: area, gap: store.config.gap)
+        animator.run(zip(windows, assignment).map { ($0, cells[$1]) }, animated: store.config.animate)
     }
 
     private func ensureTrusted() -> Bool {
         if AX.isTrusted { return true }
         AX.requestTrust()
         return false
+    }
+}
+
+/// Glides windows to their new frames with an ease-out curve, front-to-back with a small stagger.
+@MainActor
+final class FrameAnimator {
+    private var timer: Timer?
+
+    private static let duration = 0.22
+    private static let stagger = 0.03
+    private static let frameInterval = 1.0 / 60
+
+    func run(_ moves: [(ManagedWindow, CGRect)], animated: Bool) {
+        timer?.invalidate()
+        timer = nil
+        // Apps with "enhanced UI" animate frame changes themselves, so they jump straight to the end.
+        let animatable = animated ? moves.filter { !AX.hasEnhancedUI($0.0) } : []
+        for move in moves where !animatable.contains(where: { $0.0.windowID == move.0.windowID }) {
+            AX.setFrame(move.0, to: move.1)
+        }
+        guard !animatable.isEmpty else { return }
+
+        let start = Date()
+        var finished = Set<Int>()
+        let total = Self.duration + Self.stagger * Double(animatable.count - 1)
+        timer = Timer.scheduledTimer(withTimeInterval: Self.frameInterval, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                let elapsed = Date().timeIntervalSince(start)
+                for (index, (window, target)) in animatable.enumerated() {
+                    let t = (elapsed - Self.stagger * Double(index)) / Self.duration
+                    guard t > 0, !finished.contains(index) else { continue }
+                    if t >= 1 {
+                        finished.insert(index)
+                        AX.setFrame(window, to: target)
+                    } else {
+                        AX.setFrameFast(window, to: Self.interpolate(window.frame, target, Self.easeOut(t)))
+                    }
+                }
+                if finished.count == animatable.count || elapsed >= total + 0.5 {
+                    timer.invalidate()
+                    self?.timer = nil
+                }
+            }
+        }
+    }
+
+    private static func easeOut(_ t: Double) -> Double {
+        // Slight overshoot-free spring feel: cubic ease-out.
+        1 - pow(1 - t, 3)
+    }
+
+    private static func interpolate(_ a: CGRect, _ b: CGRect, _ t: Double) -> CGRect {
+        let t = CGFloat(t)
+        return CGRect(x: a.minX + (b.minX - a.minX) * t, y: a.minY + (b.minY - a.minY) * t,
+                      width: a.width + (b.width - a.width) * t, height: a.height + (b.height - a.height) * t)
     }
 }

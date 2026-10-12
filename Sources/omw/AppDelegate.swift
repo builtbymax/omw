@@ -7,7 +7,9 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let store = ConfigStore()
     private lazy var manager = WindowManager(store: store)
-    private lazy var overlay = OverlayController(store: store, manager: manager) { [weak self] in self?.openSettings() }
+    private lazy var overlay = OverlayController(store: store, manager: manager) { [weak self] in self?.openSettings(layoutID: $0) }
+    private lazy var hud = HUDController { [weak self] in self?.manager.undo() }
+    private let settingsNavigation = SettingsNavigation()
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var subscriptions: Set<AnyCancellable> = []
@@ -31,13 +33,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .sink { [weak self] config in self?.registerHotkeys(config) }
             .store(in: &subscriptions)
 
+        manager.onArranged = { [weak self] layout, count, screen in
+            guard let self, self.store.config.showHUD else { return }
+            self.hud.show(layout, count: count, on: screen)
+        }
+
         if !AX.isTrusted { AX.requestTrust() }
+        Updater.shared.start()
     }
 
     // MARK: Hotkeys
 
     private static func hotkeySignature(_ config: Config) -> [String] {
-        [config.overlayShortcut, config.moveLeftShortcut, config.moveRightShortcut].map { $0?.stringValue ?? "" }
+        ([config.overlayShortcut] + WindowCommand.allCases.map { config[keyPath: $0.keyPath] }).map { $0?.stringValue ?? "" }
             + config.layouts.map { "\($0.id):\($0.shortcut?.stringValue ?? "")" }
     }
 
@@ -47,11 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let shortcut = config.overlayShortcut {
             hotkeys.register(shortcut) { [weak self] in self?.overlay.toggle() }
         }
-        if let shortcut = config.moveLeftShortcut {
-            hotkeys.register(shortcut) { [weak self] in self?.manager.moveFocused(by: -1) }
-        }
-        if let shortcut = config.moveRightShortcut {
-            hotkeys.register(shortcut) { [weak self] in self?.manager.moveFocused(by: 1) }
+        for command in WindowCommand.allCases {
+            guard let shortcut = config[keyPath: command.keyPath] else { continue }
+            hotkeys.register(shortcut) { [weak self] in self?.manager.perform(command) }
         }
         for layout in config.layouts {
             guard let shortcut = layout.shortcut else { continue }
@@ -68,35 +74,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let open = ClosureMenuItem("Open omw") { [weak self] in self?.overlay.show() }
-        if let shortcut = store.config.overlayShortcut { open.title += "    \(shortcut.displayString)" }
-        menu.addItem(open)
+        let config = store.config
+        let activeID = manager.activeLayoutID(on: AX.targetScreen())
+        let active = activeID.flatMap(store.layout(id:))
+
+        menu.addItem(hostingItem(MenuHeader(layoutName: active?.name, trusted: AX.isTrusted)))
+        menu.addItem(.separator())
+        menu.addItem(hostingItem(QuickLayouts(layouts: config.layouts, activeID: activeID) { [weak self, weak menu] id in
+            menu?.cancelTracking()
+            DispatchQueue.main.async { self?.applyLayout(id: id) }
+        }))
         menu.addItem(.separator())
 
-        for layout in store.config.layouts {
-            let id = layout.id
-            let item = ClosureMenuItem("\(layout.name)  (\(layout.ratioLabel))") { [weak self] in self?.applyLayout(id: id) }
-            item.state = layout.id == manager.activeLayoutID(on: AX.targetScreen()) ? .on : .off
-            menu.addItem(item)
+        menu.addItem(ClosureMenuItem("Open omw…", symbol: "magnifyingglass", shortcut: config.overlayShortcut) { [weak self] in self?.overlay.show() })
+        let move = NSMenuItem(title: "Move Window", action: nil, keyEquivalent: "")
+        move.image = NSImage(systemSymbolName: "macwindow.on.rectangle", accessibilityDescription: nil)
+        move.submenu = NSMenu()
+        for (index, command) in WindowCommand.allCases.enumerated() {
+            if index > 0, command.style != WindowCommand.allCases[index - 1].style { move.submenu?.addItem(.separator()) }
+            let title = command.title.replacingOccurrences(of: "Move Window ", with: "").capitalizingFirstLetter
+            move.submenu?.addItem(ClosureMenuItem(title, symbol: command.symbol, shortcut: config[keyPath: command.keyPath]) { [weak self] in
+                self?.manager.perform(command)
+            })
+        }
+        menu.addItem(move)
+        if manager.canUndo {
+            menu.addItem(ClosureMenuItem("Undo Last Arrange", symbol: "arrow.uturn.backward") { [weak self] in self?.manager.undo() })
         }
         menu.addItem(.separator())
 
         if !AX.isTrusted {
-            menu.addItem(ClosureMenuItem("Grant Accessibility Access…") { AX.requestTrust() })
+            menu.addItem(ClosureMenuItem("Grant Accessibility Access…", symbol: "accessibility") { AX.requestTrust() })
         }
-        let login = ClosureMenuItem("Launch at Login") { LaunchAtLogin.set(!LaunchAtLogin.isEnabled) }
+        let login = ClosureMenuItem("Launch at Login", symbol: "power") { LaunchAtLogin.set(!LaunchAtLogin.isEnabled) }
         login.state = LaunchAtLogin.isEnabled ? .on : .off
         menu.addItem(login)
-        menu.addItem(ClosureMenuItem("Settings…", key: ",") { [weak self] in self?.openSettings() })
-        menu.addItem(.separator())
-        menu.addItem(ClosureMenuItem("Quit omw", key: "q") { NSApp.terminate(nil) })
+        let updater = Updater.shared
+        if updater.isAvailable {
+            let title = updater.pendingVersion.map { "Install Update (\($0))…" } ?? "Check for Updates…"
+            menu.addItem(ClosureMenuItem(title, symbol: "arrow.down.circle") { updater.checkForUpdates() })
+        }
+        menu.addItem(ClosureMenuItem("Settings…", symbol: "gearshape", key: ",") { [weak self] in self?.openSettings() })
+        menu.addItem(ClosureMenuItem("Quit omw", symbol: "rectangle.portrait.and.arrow.right", key: "q") { NSApp.terminate(nil) })
     }
 
-    private func openSettings() {
+    private func hostingItem(_ view: some View) -> NSMenuItem {
+        let hosting = NSHostingView(rootView: view)
+        hosting.frame.size = hosting.fittingSize
+        let item = NSMenuItem()
+        item.view = hosting
+        return item
+    }
+
+    private func openSettings(layoutID: UUID? = nil) {
+        if let layoutID {
+            settingsNavigation.page = .layouts
+            settingsNavigation.layoutID = layoutID
+        }
         if settingsWindow == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(store: store)))
+            let hosting = NSHostingController(rootView: SettingsView(store: store, navigation: settingsNavigation))
+            hosting.sizingOptions = []
+            let window = NSWindow(contentViewController: hosting)
             window.title = "omw Settings"
-            window.styleMask = [.titled, .closable]
+            window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            // Off, so dragging in the layout editor doesn't drag the window. The title bar still moves it.
+            window.isMovableByWindowBackground = false
+            window.setContentSize(SettingsView.size)
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindow = window
@@ -132,10 +177,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 final class ClosureMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(_ title: String, key: String = "", handler: @escaping () -> Void) {
+    init(_ title: String, symbol: String? = nil, key: String = "", shortcut: Shortcut? = nil, handler: @escaping () -> Void) {
         self.handler = handler
         super.init(title: title, action: #selector(run), keyEquivalent: key)
         target = self
+        if let symbol { image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
+        // Global shortcuts are shown like regular key equivalents, they only fire while the menu is open.
+        if let shortcut, let equivalent = shortcut.menuKeyEquivalent {
+            keyEquivalent = equivalent
+            keyEquivalentModifierMask = shortcut.menuModifiers
+        }
     }
 
     required init(coder: NSCoder) {
@@ -145,4 +196,103 @@ final class ClosureMenuItem: NSMenuItem {
     @objc private func run() {
         handler()
     }
+}
+
+private extension Shortcut {
+    var menuKeyEquivalent: String? {
+        guard let name = keyName else { return nil }
+        let special: [String: Int] = [
+            "left": NSLeftArrowFunctionKey, "right": NSRightArrowFunctionKey,
+            "up": NSUpArrowFunctionKey, "down": NSDownArrowFunctionKey,
+        ]
+        if let code = special[name], let scalar = UnicodeScalar(code) { return String(Character(scalar)) }
+        if name == "space" { return " " }
+        return name.count == 1 ? name : nil
+    }
+
+    var menuModifiers: NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if modifiers & Shortcut.control != 0 { flags.insert(.control) }
+        if modifiers & Shortcut.option != 0 { flags.insert(.option) }
+        if modifiers & Shortcut.shift != 0 { flags.insert(.shift) }
+        if modifiers & Shortcut.command != 0 { flags.insert(.command) }
+        return flags
+    }
+}
+
+// MARK: - Menu views
+
+/// App icon, the active layout and whether omw can move windows.
+private struct MenuHeader: View {
+    let layoutName: String?
+    let trusted: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            AppIconView(size: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("omw").font(.system(size: 13, weight: .bold))
+                Text(trusted ? (layoutName.map { "\($0) is active" } ?? "No layout applied yet") : "Accessibility access needed")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Circle()
+                .fill(trusted ? Theme.green : Color.orange)
+                .frame(width: 7, height: 7)
+                .shadow(color: (trusted ? Theme.green : Color.orange).opacity(0.9), radius: 3)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .frame(width: 300)
+    }
+}
+
+/// One-click grid of layout icons.
+private struct QuickLayouts: View {
+    let layouts: [Layout]
+    let activeID: UUID?
+    let apply: (UUID) -> Void
+
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 6), spacing: 4) {
+            ForEach(layouts) { layout in
+                QuickLayoutButton(layout: layout, active: layout.id == activeID) { apply(layout.id) }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 2)
+        .frame(width: 300)
+    }
+}
+
+private struct QuickLayoutButton: View {
+    let layout: Layout
+    let active: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                LayoutIcon(layout: layout, size: 30)
+                    .scaleEffect(hovered ? 1.08 : 1)
+                Text(layout.name.replacingOccurrences(of: "Main ", with: ""))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(active ? .primary : .secondary)
+                    .lineLimit(1)
+            }
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity)
+            .selectedRow(active, hovered: hovered, cornerRadius: 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(layout.name)  \(layout.ratioLabel)")
+        .onHover { hovering in withAnimation(.spring(response: 0.2, dampingFraction: 0.6)) { hovered = hovering } }
+    }
+}
+
+private extension String {
+    var capitalizingFirstLetter: String { prefix(1).uppercased() + dropFirst() }
 }

@@ -3,3 +3,5 @@
 .swiftpm/
 build/
 .vscode/
+*.p12
+*.cer

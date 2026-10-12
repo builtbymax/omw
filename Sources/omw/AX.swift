@@ -11,6 +11,10 @@ struct ManagedWindow {
     let bundleID: String?
     let windowID: CGWindowID
     let frame: CGRect
+
+    func with(frame: CGRect) -> ManagedWindow {
+        ManagedWindow(element: element, app: app, bundleID: bundleID, windowID: windowID, frame: frame)
+    }
 }
 
 /// Thin wrapper around the Accessibility API. All rects use top-left origin coordinates.
@@ -56,6 +60,20 @@ enum AX {
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         return element(axApp, kAXFocusedWindowAttribute) ?? element(axApp, kAXMainWindowAttribute)
+    }
+
+    /// The focused window with everything needed to move it.
+    static func focusedManagedWindow() -> ManagedWindow? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let window = focusedWindow(), let id = windowID(of: window), let frame = frame(of: window) else { return nil }
+        return ManagedWindow(element: window, app: AXUIElementCreateApplication(app.processIdentifier),
+                             bundleID: app.bundleIdentifier, windowID: id, frame: frame)
+    }
+
+    /// The screen containing the center of `frame`.
+    static func screen(containing frame: CGRect) -> NSScreen? {
+        NSScreen.screens.first { $0.axFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) }
     }
 
     /// The screen of the focused window, falling back to the screen under the mouse.
@@ -104,6 +122,18 @@ enum AX {
         return result.sorted { zOrder[$0.windowID]! < zOrder[$1.windowID]! }
     }
 
+    static func hasEnhancedUI(_ window: ManagedWindow) -> Bool {
+        copy(window.app, "AXEnhancedUserInterface") as? Bool == true
+    }
+
+    /// Position and size only, for in-between animation frames.
+    static func setFrameFast(_ window: ManagedWindow, to rect: CGRect) {
+        var origin = rect.origin
+        var size = rect.size
+        AXUIElementSetAttributeValue(window.element, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &origin)!)
+        AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, AXValueCreate(.cgSize, &size)!)
+    }
+
     static func setFrame(_ window: ManagedWindow, to rect: CGRect) {
         let current = window.frame
         if abs(current.minX - rect.minX) < 1, abs(current.minY - rect.minY) < 1,
@@ -112,7 +142,7 @@ enum AX {
         // Apps with "enhanced UI" (set by VoiceOver-like tools, Chrome/Electron) animate and drop
         // size changes, so it gets switched off while resizing.
         let enhancedKey = "AXEnhancedUserInterface" as CFString
-        let enhanced = copy(window.app, "AXEnhancedUserInterface") as? Bool == true
+        let enhanced = hasEnhancedUI(window)
         if enhanced { AXUIElementSetAttributeValue(window.app, enhancedKey, kCFBooleanFalse) }
 
         var origin = rect.origin
