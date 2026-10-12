@@ -1,0 +1,144 @@
+import AppKit
+import ApplicationServices
+
+/// Private but long-stable API (used by Rectangle, Amethyst, yabai) to map an AX window to its CGWindowID.
+@_silgen_name("_AXUIElementGetWindow") @discardableResult
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
+
+struct ManagedWindow {
+    let element: AXUIElement
+    let app: AXUIElement
+    let bundleID: String?
+    let windowID: CGWindowID
+    let frame: CGRect
+}
+
+/// Thin wrapper around the Accessibility API. All rects use top-left origin coordinates.
+enum AX {
+    static var isTrusted: Bool { AXIsProcessTrusted() }
+
+    static func requestTrust() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        AXIsProcessTrustedWithOptions(options)
+    }
+
+    // MARK: Attributes
+
+    static func copy(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success ? value : nil
+    }
+
+    static func element(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
+        guard let value = copy(element, attribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
+    }
+
+    static func frame(of element: AXUIElement) -> CGRect? {
+        guard let p = copy(element, kAXPositionAttribute), CFGetTypeID(p) == AXValueGetTypeID(),
+              let s = copy(element, kAXSizeAttribute), CFGetTypeID(s) == AXValueGetTypeID() else { return nil }
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        AXValueGetValue(p as! AXValue, .cgPoint, &origin)
+        AXValueGetValue(s as! AXValue, .cgSize, &size)
+        return CGRect(origin: origin, size: size)
+    }
+
+    static func windowID(of element: AXUIElement) -> CGWindowID? {
+        var id: CGWindowID = 0
+        return _AXUIElementGetWindow(element, &id) == .success && id != 0 ? id : nil
+    }
+
+    // MARK: Windows
+
+    static func focusedWindow() -> AXUIElement? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        return element(axApp, kAXFocusedWindowAttribute) ?? element(axApp, kAXMainWindowAttribute)
+    }
+
+    /// The screen of the focused window, falling back to the screen under the mouse.
+    static func targetScreen() -> NSScreen? {
+        if let window = focusedWindow(), let frame = frame(of: window),
+           let screen = NSScreen.screens.first(where: { $0.axFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) }) {
+            return screen
+        }
+        let mouse = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+    }
+
+    /// Normal windows on the current desktop (Space) whose center is on `screen`, frontmost first.
+    static func visibleWindows(on screen: NSScreen) -> [ManagedWindow] {
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        var zOrder: [CGWindowID: Int] = [:]
+        var pids = Set<pid_t>()
+        for (index, window) in info.enumerated() {
+            guard window[kCGWindowLayer as String] as? Int == 0,
+                  let number = window[kCGWindowNumber as String] as? Int,
+                  let pid = window[kCGWindowOwnerPID as String] as? Int else { continue }
+            if let alpha = window[kCGWindowAlpha as String] as? Double, alpha <= 0 { continue }
+            zOrder[CGWindowID(number)] = index
+            pids.insert(pid_t(pid))
+        }
+
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let screenFrame = screen.axFrame
+        var result: [ManagedWindow] = []
+
+        for app in NSWorkspace.shared.runningApplications
+        where app.activationPolicy == .regular && app.processIdentifier != ownPID && pids.contains(app.processIdentifier) {
+            let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            guard let windows = copy(axApp, kAXWindowsAttribute) as? [AXUIElement] else { continue }
+            for window in windows {
+                guard let id = windowID(of: window), zOrder[id] != nil,
+                      copy(window, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole,
+                      copy(window, kAXMinimizedAttribute) as? Bool != true,
+                      copy(window, "AXFullScreen") as? Bool != true,
+                      let frame = frame(of: window),
+                      screenFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { continue }
+                result.append(ManagedWindow(element: window, app: axApp, bundleID: app.bundleIdentifier, windowID: id, frame: frame))
+            }
+        }
+
+        return result.sorted { zOrder[$0.windowID]! < zOrder[$1.windowID]! }
+    }
+
+    static func setFrame(_ window: ManagedWindow, to rect: CGRect) {
+        let current = window.frame
+        if abs(current.minX - rect.minX) < 1, abs(current.minY - rect.minY) < 1,
+           abs(current.width - rect.width) < 1, abs(current.height - rect.height) < 1 { return }
+
+        // Apps with "enhanced UI" (set by VoiceOver-like tools, Chrome/Electron) animate and drop
+        // size changes, so it gets switched off while resizing.
+        let enhancedKey = "AXEnhancedUserInterface" as CFString
+        let enhanced = copy(window.app, "AXEnhancedUserInterface") as? Bool == true
+        if enhanced { AXUIElementSetAttributeValue(window.app, enhancedKey, kCFBooleanFalse) }
+
+        var origin = rect.origin
+        var size = rect.size
+        let position = AXValueCreate(.cgPoint, &origin)!
+        let dimensions = AXValueCreate(.cgSize, &size)!
+        // Size, move, size again: the first resize can be clamped by the old position on screen.
+        AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, dimensions)
+        AXUIElementSetAttributeValue(window.element, kAXPositionAttribute as CFString, position)
+        AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, dimensions)
+
+        if enhanced { AXUIElementSetAttributeValue(window.app, enhancedKey, kCFBooleanTrue) }
+    }
+}
+
+extension NSScreen {
+    var displayID: CGDirectDisplayID {
+        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
+    }
+
+    /// Frame in top-left origin coordinates, as used by the Accessibility API.
+    var axFrame: CGRect { Self.toAX(frame) }
+    var axVisibleFrame: CGRect { Self.toAX(visibleFrame) }
+
+    private static func toAX(_ rect: NSRect) -> CGRect {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? rect.maxY
+        return CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
+    }
+}
