@@ -25,8 +25,9 @@ All shortcuts can be changed in **Settings** (menu bar icon → Settings…), an
   the selected layout, `⌘,` opens Settings.
 
 Moving windows between workspaces has no public macOS API. omw briefly holds the window by its title
-bar and presses the Mission Control shortcuts "Move left/right a space" (`⌃←` / `⌃→`), so those
-need to stay enabled in System Settings → Keyboard → Keyboard Shortcuts → Mission Control.
+bar and presses the Mission Control shortcuts "Move left/right a space" (`⌃←` / `⌃→` unless you
+remapped them), so those need to stay enabled in System Settings → Keyboard → Keyboard Shortcuts →
+Mission Control. If there's no Space in that direction or the shortcut is off, omw beeps.
 
 After a layout is applied, windows glide into place and a small "Arranged N windows" confirmation
 offers **Undo** for a few seconds (also in the launcher and the menu). Both can be turned off in

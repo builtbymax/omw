@@ -73,35 +73,119 @@ enum WindowCommand: String, CaseIterable, Identifiable {
     }
 }
 
+/// Private but long-stable SkyLight API (used by yabai, Amethyst): the Spaces of each display.
+@_silgen_name("CGSMainConnectionID") private func CGSMainConnectionID() -> Int32
+@_silgen_name("CGSCopyManagedDisplaySpaces") private func CGSCopyManagedDisplaySpaces(_ connection: Int32) -> CFArray
+
 /// Moves a window to the neighbouring Space. macOS has no public API for this, so it does what
-/// a person would do: hold the window by its title bar and press the Mission Control shortcut
-/// for switching Spaces (⌃← / ⌃→, System Settings → Keyboard → Shortcuts → Mission Control).
+/// a person would do: drag the window by its title bar and press the Mission Control shortcut
+/// for switching Spaces (System Settings → Keyboard → Shortcuts → Mission Control).
 @MainActor
 enum SpaceMover {
+    private struct Shortcut {
+        let keyCode: CGKeyCode
+        let flags: CGEventFlags
+    }
+
     static func move(_ window: ManagedWindow, by delta: Int) {
-        // Just right of the traffic lights, near the top edge, so it's title bar and not a tab.
-        let grab = CGPoint(x: window.frame.minX + 80, y: window.frame.minY + 8)
+        guard hasSpace(beside: window, by: delta) != false,
+              let shortcut = missionControlShortcut(right: delta > 0) else {
+            NSSound.beep()
+            return
+        }
+        afterKeysReleased(until: .now + 1) { drag(window, with: shortcut) }
+    }
+
+    /// Runs `action` once no key is held. The omw hotkey (⌃⌥⇧→) is usually still down when the
+    /// command fires, and macOS ignores the Space shortcut while the real arrow key is pressed.
+    private static func afterKeysReleased(until deadline: Date, _ action: @escaping @MainActor () -> Void) {
+        let modifiers: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
+        let held = !CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty
+            || (0..<128).contains { CGEventSource.keyState(.hidSystemState, key: CGKeyCode($0)) }
+        guard held, Date.now < deadline else {
+            action()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { afterKeysReleased(until: deadline, action) }
+    }
+
+    private static func drag(_ window: ManagedWindow, with shortcut: Shortcut) {
+        let grab = grabPoint(for: window)
         let restore = CGEvent(source: nil)?.location
         let source = CGEventSource(stateID: .hidSystemState)
 
-        func post(_ type: CGEventType) {
-            CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: grab, mouseButton: .left)?.post(tap: .cghidEventTap)
+        // Explicit empty flags, in case a modifier is still held after the wait timed out.
+        func post(_ type: CGEventType, at point: CGPoint) {
+            let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
+            event?.flags = []
+            event?.post(tap: .cghidEventTap)
         }
 
-        post(.mouseMoved)
-        post(.leftMouseDown)
+        // Without a real drag, current macOS ignores the Space switch for the held window.
+        var switched = false
+        let observer = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+        ) { _ in MainActor.assumeIsolated { switched = true } }
+
+        post(.mouseMoved, at: grab)
+        post(.leftMouseDown, at: grab)
+        post(.leftMouseDragged, at: CGPoint(x: grab.x + 1, y: grab.y))
+        post(.leftMouseDragged, at: grab)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            let arrow: CGKeyCode = delta > 0 ? 124 : 123
             for down in [true, false] {
-                let key = CGEvent(keyboardEventSource: source, virtualKey: arrow, keyDown: down)
-                key?.flags = .maskControl
+                let key = CGEvent(keyboardEventSource: source, virtualKey: shortcut.keyCode, keyDown: down)
+                key?.flags = shortcut.flags
                 key?.post(tap: .cghidEventTap)
             }
             // Keep holding until the Space switch animation has picked up the window.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                post(.leftMouseUp)
+                post(.leftMouseUp, at: grab)
                 if let restore { CGWarpMouseCursorPosition(restore) }
+                // No Space change means there's no Space in that direction or the shortcut didn't fire.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    NSWorkspace.shared.notificationCenter.removeObserver(observer)
+                    if !switched { NSSound.beep() }
+                }
             }
         }
+    }
+
+    /// Whether the window's display has a Space in that direction, nil when macOS doesn't say.
+    /// Without this check the first and last Space look like the command is broken.
+    private static func hasSpace(beside window: ManagedWindow, by delta: Int) -> Bool? {
+        guard let screen = AX.screen(containing: window.frame),
+              let uuid = CGDisplayCreateUUIDFromDisplayID(screen.displayID)?.takeRetainedValue(),
+              let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID()) as? [[String: Any]] else { return nil }
+        let id = CFUUIDCreateString(nil, uuid) as String
+        // With "Displays have separate Spaces" off there's one entry for all displays.
+        guard let display = displays.count == 1 ? displays.first : displays.first(where: { $0["Display Identifier"] as? String == id }),
+              let spaces = (display["Spaces"] as? [[String: Any]])?.compactMap({ $0["ManagedSpaceID"] as? Int }),
+              let current = (display["Current Space"] as? [String: Any])?["ManagedSpaceID"] as? Int,
+              let index = spaces.firstIndex(of: current) else { return nil }
+        return spaces.indices.contains(index + delta)
+    }
+
+    /// Just right of the zoom button, so it's title bar and not a tab or toolbar item. Apps with
+    /// custom title bars move the traffic lights, so ask for the button instead of guessing.
+    private static func grabPoint(for window: ManagedWindow) -> CGPoint {
+        if let zoom = AX.element(window.element, kAXZoomButtonAttribute), let button = AX.frame(of: zoom) {
+            return CGPoint(x: button.maxX + 6, y: button.midY)
+        }
+        return CGPoint(x: window.frame.minX + 80, y: window.frame.minY + 8)
+    }
+
+    /// "Move left/right a space" as configured in System Settings, nil when it's turned off.
+    /// Real arrow-key presses carry fn and macOS only matches the shortcut with it, but the stored
+    /// modifiers don't always include it.
+    private static func missionControlShortcut(right: Bool) -> Shortcut? {
+        let fallback = Shortcut(keyCode: right ? 124 : 123, flags: [.maskControl, .maskSecondaryFn])
+        guard let hotkeys = CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString, "com.apple.symbolichotkeys" as CFString) as? [String: Any],
+              let entry = hotkeys[right ? "81" : "79"] as? [String: Any] else { return fallback }
+        if let enabled = entry["enabled"] as? Bool, !enabled { return nil }
+        guard let parameters = (entry["value"] as? [String: Any])?["parameters"] as? [Int], parameters.count == 3 else { return fallback }
+        let keyCode = CGKeyCode(parameters[1])
+        var flags = CGEventFlags(rawValue: UInt64(parameters[2]))
+        if (123...126).contains(keyCode) { flags.insert(.maskSecondaryFn) }
+        return Shortcut(keyCode: keyCode, flags: flags)
     }
 }
