@@ -843,8 +843,6 @@ private struct BlueprintEditor: View {
             let height = geometry.size.height
             let fractions = layout.fractions
             let edges = fractions.indices.reduce(into: [0.0]) { $0.append($0.last! + fractions[$1]) }
-            let counts = layout.rowCounts
-            let largest = fractions.indices.filter { counts[$0] > 0 }.max { fractions[$0] < fractions[$1] }
 
             ZStack(alignment: .topLeading) {
                 BlueprintGrid(divisions: 20).stroke(.white.opacity(0.06), lineWidth: 0.5)
@@ -853,7 +851,7 @@ private struct BlueprintEditor: View {
                 ForEach(fractions.indices, id: \.self) { index in
                     let minX = pad + inner * edges[index] + (index == 0 ? 0 : gap / 2)
                     let maxX = pad + inner * edges[index + 1] - (index == fractions.count - 1 ? 0 : gap / 2)
-                    column(index, percent: fractions[index], emphasized: index == largest)
+                    column(index, percent: fractions[index])
                         .frame(width: max(4, maxX - minX), height: height - pad * 2 - 22)
                         .offset(x: minX, y: pad)
                     Text("COL \(index + 1)")
@@ -890,7 +888,7 @@ private struct BlueprintEditor: View {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.rim(0.3, 0.08)))
     }
 
-    private func column(_ index: Int, percent: Double, emphasized: Bool) -> some View {
+    private func column(_ index: Int, percent: Double) -> some View {
         let rows = layout.rowCounts[index]
         let first = layout.cellIndex(column: index, row: 0)
         let hovered = hoveredColumn == index && dragging == nil
@@ -899,7 +897,7 @@ private struct BlueprintEditor: View {
                 emptyColumn(percent: percent)
             }
             ForEach(0..<rows, id: \.self) { row in
-                cell(first + row, percent: percent, large: emphasized && rows == 1)
+                cell(first + row, percent: percent)
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -934,12 +932,12 @@ private struct BlueprintEditor: View {
         }
     }
 
-    private func cell(_ cell: Int, percent: Double, large: Bool) -> some View {
+    private func cell(_ cell: Int, percent: Double) -> some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         let apps = layout.pins.filter { $0.value == cell }.keys.sorted()
         return VStack(spacing: 6) {
             Text("\(Int((percent * 100).rounded()))%")
-                .font(.system(size: large ? 22 : 15, weight: .semibold, design: .monospaced))
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color(hex: 0x0B2E80))
                 .contentTransition(.numericText())
             if !apps.isEmpty {
