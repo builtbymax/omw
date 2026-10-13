@@ -569,7 +569,7 @@ private struct OverlayRow: View {
             }
 
             Text(item.title)
-                .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.white.opacity(isSelected ? 1 : 0.88))
 
             if let badge = item.badge { RatioPill(text: badge) }
