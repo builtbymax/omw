@@ -603,7 +603,7 @@ private struct PreviewPane: View {
             Spacer(minLength: 0)
         }
         .padding(20)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
         .animation(.easeOut(duration: 0.15), value: model.selected?.id)
     }
