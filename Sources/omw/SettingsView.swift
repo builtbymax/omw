@@ -269,6 +269,8 @@ private struct GeneralSettings: View {
     @ObservedObject private var updater = Updater.shared
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var trusted = AX.isTrusted
+    @State private var reloaded = false
+    @State private var reloadError: String?
 
     var body: some View {
         ScrollPage {
@@ -317,13 +319,44 @@ private struct GeneralSettings: View {
             SettingsSection(title: "Configuration") {
                 SettingsRow(.config, "Config file", subtitle: store.url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
                             monoSubtitle: true, divider: false) {
-                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([store.url]) }
+                    HStack(spacing: 8) {
+                        Button { reloadConfig() } label: {
+                            Image(systemName: reloaded ? "checkmark" : "arrow.clockwise")
+                                .contentTransition(.symbolEffect(.replace))
+                                .frame(width: 14)
+                        }
                         .buttonStyle(.glassCapsule(.secondary))
+                        .help("Reload config")
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([store.url]) }
+                            .buttonStyle(.glassCapsule(.secondary))
+                    }
                 }
             }
         }
+        .alert("Could not reload config", isPresented: Binding(get: { reloadError != nil }, set: { if !$0 { reloadError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("\(reloadError ?? "")\n\nYour current settings are unchanged.")
+        }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
             trusted = AX.isTrusted
+        }
+    }
+}
+
+private extension GeneralSettings {
+    func reloadConfig() {
+        do {
+            try store.reload()
+            withAnimation { reloaded = true }
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                withAnimation { reloaded = false }
+            }
+        } catch let error as DecodingError {
+            reloadError = error.configMessage
+        } catch {
+            reloadError = error.localizedDescription
         }
     }
 }
