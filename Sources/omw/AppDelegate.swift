@@ -23,6 +23,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
+        // ⌘-dragging the icon out of the menu bar turns the setting off too.
+        statusItem.behavior = .removalAllowed
+        store.$config
+            .map(\.showMenuBarIcon)
+            .removeDuplicates()
+            .sink { [weak self] visible in self?.statusItem.isVisible = visible }
+            .store(in: &subscriptions)
+        statusItem.publisher(for: \.isVisible)
+            .sink { [weak self] visible in
+                guard let self, self.store.config.showMenuBarIcon != visible else { return }
+                self.store.config.showMenuBarIcon = visible
+            }
+            .store(in: &subscriptions)
 
         HotkeyCenter.shared.reload = { [weak self] in
             guard let self else { return }
@@ -40,6 +53,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if !AX.isTrusted { AX.requestTrust() }
         Updater.shared.start()
+    }
+
+    /// Opening omw again from Finder, Spotlight or a launcher shows Settings, the way back when the icon is hidden.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openSettings()
+        return false
     }
 
     // MARK: Hotkeys

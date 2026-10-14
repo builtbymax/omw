@@ -19,6 +19,8 @@ public struct Config: Codable, Equatable {
     public var animate: Bool
     /// Show the "Arranged N windows" confirmation with Undo after applying a layout.
     public var showHUD: Bool
+    /// Off hides the status item; Settings stay reachable via the launcher or by reopening omw.
+    public var showMenuBarIcon: Bool
     public var lastLayoutID: UUID?
 
     public init(
@@ -36,6 +38,7 @@ public struct Config: Codable, Equatable {
         switchDisplayShortcut: Shortcut? = Shortcut(string: "cmd+d"),
         animate: Bool = true,
         showHUD: Bool = true,
+        showMenuBarIcon: Bool = true,
         lastLayoutID: UUID? = nil
     ) {
         self.layouts = layouts
@@ -52,13 +55,14 @@ public struct Config: Codable, Equatable {
         self.switchDisplayShortcut = switchDisplayShortcut
         self.animate = animate
         self.showHUD = showHUD
+        self.showMenuBarIcon = showMenuBarIcon
         self.lastLayoutID = lastLayoutID
     }
 
     private enum CodingKeys: String, CodingKey {
         case layouts, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
         case moveToNextDisplayShortcut, moveToPreviousDisplayShortcut, moveToNextSpaceShortcut, moveToPreviousSpaceShortcut
-        case switchDisplayShortcut, animate, showHUD, lastLayoutID
+        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, lastLayoutID
     }
 
     /// Missing keys fall back to defaults, an explicit `null` shortcut stays disabled.
@@ -82,6 +86,7 @@ public struct Config: Codable, Equatable {
         switchDisplayShortcut = try shortcut(.switchDisplayShortcut, d.switchDisplayShortcut)
         animate = try c.decodeIfPresent(Bool.self, forKey: .animate) ?? d.animate
         showHUD = try c.decodeIfPresent(Bool.self, forKey: .showHUD) ?? d.showHUD
+        showMenuBarIcon = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? d.showMenuBarIcon
         lastLayoutID = try c.decodeIfPresent(UUID.self, forKey: .lastLayoutID)
     }
 
@@ -101,6 +106,7 @@ public struct Config: Codable, Equatable {
         try c.encode(switchDisplayShortcut, forKey: .switchDisplayShortcut)
         try c.encode(animate, forKey: .animate)
         try c.encode(showHUD, forKey: .showHUD)
+        try c.encode(showMenuBarIcon, forKey: .showMenuBarIcon)
         try c.encodeIfPresent(lastLayoutID, forKey: .lastLayoutID)
     }
 }

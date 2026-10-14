@@ -284,6 +284,9 @@ private struct GeneralSettings: View {
                             launchAtLogin = LaunchAtLogin.isEnabled
                         }
                 }
+                SettingsRow(.menuBar, "Show in menu bar", subtitle: menuBarSubtitle) {
+                    Toggle("", isOn: $store.config.showMenuBarIcon).toggleStyle(.switch).labelsHidden()
+                }
                 SettingsRow(.accessibility, "Accessibility", subtitle: "Needed to move and resize windows.") {
                     if trusted {
                         StatusBadge(text: "Granted", color: Theme.green, textColor: Color(hex: 0x4ADE80))
@@ -345,6 +348,12 @@ private struct GeneralSettings: View {
 }
 
 private extension GeneralSettings {
+    var menuBarSubtitle: String {
+        if store.config.showMenuBarIcon { return "Quick access to layouts and settings." }
+        let launcher = store.config.overlayShortcut.map { "the launcher (\($0.displayString) → ⌘,)" } ?? "the launcher"
+        return "Open Settings via \(launcher) or by opening omw again."
+    }
+
     func reloadConfig() {
         do {
             try store.reload()
