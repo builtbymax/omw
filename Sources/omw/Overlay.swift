@@ -69,6 +69,8 @@ final class OverlayModel: ObservableObject {
     var onSelectionChange: () -> Void = {}
     var onSwitchScreen: () -> Void = {}
     var actionsFor: (OverlayItem) -> [OverlayAction] = { _ in [] }
+    /// Items made from the query itself, e.g. a quick layout for "40/20/40". They come first.
+    var itemsFor: (String) -> [OverlayItem] = { _ in [] }
 
     var selected: OverlayItem? {
         results.indices.contains(selection) ? results[selection] : nil
@@ -141,10 +143,12 @@ final class OverlayModel: ObservableObject {
     }
 
     private func filter() {
-        results = items.enumerated()
+        let matches: [OverlayItem] = items.enumerated()
             .compactMap { index, item in Fuzzy.score(query, in: item.searchText).map { (item, $0, index) } }
             .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.2 < $1.2 }
             .map(\.0)
+        let extra = itemsFor(query)
+        results = extra + matches.filter { match in !extra.contains { $0.id == match.id } }
         selection = 0
         onSelectionChange()
     }
@@ -242,6 +246,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
         model.onSelectionChange = { [weak self] in self?.updateGhost() }
         model.onSwitchScreen = { [weak self] in self?.switchScreen() }
         model.actionsFor = { [weak self] item in self?.actions(for: item) ?? [] }
+        model.itemsFor = { [weak self] query in self?.quickLayoutItems(for: query) ?? [] }
     }
 
     func toggle() {
@@ -290,7 +295,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
             switch event.charactersIgnoringModifiers {
             case "k": self.model.toggleActions()
             case "e":
-                guard let id = self.model.selected?.layout?.id else { return event }
+                guard let id = self.model.selected?.layout?.id, self.store.layout(id: id) != nil else { return event }
                 self.hide()
                 self.openSettings(id)
             case ",":
@@ -341,7 +346,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
 
     private func actions(for item: OverlayItem) -> [OverlayAction] {
         var actions: [OverlayAction] = []
-        if let layout = item.layout {
+        if let layout = item.layout, store.layout(id: layout.id) != nil {
             let id = layout.id
             actions.append(OverlayAction(id: "apply", title: "Apply Layout", style: .layouts, keys: ["↩"]) { [weak self] in
                 self?.hide()
@@ -370,20 +375,48 @@ final class OverlayController: NSObject, NSWindowDelegate {
         return actions
     }
 
+    /// "Apply Quick Layout" and "Apply Layout and Save" for a column spec like "40/20/40".
+    /// When a saved layout has the same proportions (20/20/20 is Thirds), it's offered instead of saving.
+    private func quickLayoutItems(for query: String) -> [OverlayItem] {
+        guard let parsed = Layout.parse(query.trimmingCharacters(in: .whitespaces)) else { return [] }
+        let layout = Layout(name: "Quick Layout", ratios: parsed.ratios, rows: parsed.rows)
+        let label = layout.ratioLabel
+        var items = [OverlayItem(id: "quick-apply", title: "Apply Quick Layout", badge: label, section: .layouts,
+                                 icon: .layout(layout), layout: layout, actionTitle: "Apply Layout") { [weak self] in
+            guard let self else { return }
+            self.manager.apply(layout, on: self.screen)
+        }]
+        if let existing = store.config.layouts.first(where: { $0.fractions == layout.fractions && $0.rowCounts == layout.rowCounts }) {
+            items.append(layoutItem(existing))
+        } else {
+            var saved = layout
+            saved.name = label
+            items.append(OverlayItem(id: "quick-save", title: "Apply Layout and Save", badge: label, section: .layouts,
+                                     icon: .layout(saved), layout: saved, actionTitle: "Apply and Save") { [weak self] in
+                guard let self else { return }
+                self.store.config.layouts.append(saved)
+                self.manager.apply(saved, on: self.screen)
+            })
+        }
+        return items
+    }
+
+    private func layoutItem(_ layout: Layout) -> OverlayItem {
+        OverlayItem(
+            id: layout.id.uuidString,
+            title: layout.name,
+            badge: layout.ratioLabel,
+            keys: layout.shortcut?.displayKeys ?? [],
+            section: .layouts,
+            icon: .layout(layout),
+            layout: layout,
+            actionTitle: "Apply Layout"
+        ) { [weak self] in self?.apply(layout.id) }
+    }
+
     private func items() -> [OverlayItem] {
         let config = store.config
-        let layouts = config.layouts.map { layout in
-            OverlayItem(
-                id: layout.id.uuidString,
-                title: layout.name,
-                badge: layout.ratioLabel,
-                keys: layout.shortcut?.displayKeys ?? [],
-                section: .layouts,
-                icon: .layout(layout),
-                layout: layout,
-                actionTitle: "Apply Layout"
-            ) { [weak self] in self?.apply(layout.id) }
-        }
+        let layouts = config.layouts.map(layoutItem)
         var commands: [OverlayItem] = []
         if let version = Updater.shared.pendingVersion {
             commands.append(OverlayItem(id: "update", title: "Install Update (\(version))", section: .commands, icon: .tile(.update),

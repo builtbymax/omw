@@ -33,6 +33,8 @@ final class WindowManager {
     private var undoState: (moves: [(window: ManagedWindow, frame: CGRect)], displayID: CGDirectDisplayID, layoutID: UUID?,
                             arranged: Set<CGWindowID>?)?
     private let animator = FrameAnimator()
+    /// Layouts applied from the launcher without saving them, so "Refresh Layout" still finds them.
+    private var unsavedLayouts: [UUID: Layout] = [:]
 
     /// Called after a layout was applied with the number of windows that were arranged.
     var onArranged: ((Layout, Int, NSScreen) -> Void)?
@@ -59,7 +61,11 @@ final class WindowManager {
         place(windows, assignment, layout: layout, area: area)
         activeLayouts[screen.displayID] = layout.id
         arrangedWindows[screen.displayID] = Set(windows.map(\.windowID))
-        store.config.lastLayoutID = layout.id
+        if store.layout(id: layout.id) == nil {
+            unsavedLayouts[layout.id] = layout
+        } else {
+            store.config.lastLayoutID = layout.id
+        }
         onArranged?(layout, windows.count, screen)
         return .success((windows.count, screen))
     }
@@ -196,7 +202,7 @@ final class WindowManager {
     private func layout(for screen: NSScreen) -> Layout {
         let layouts = store.config.layouts
         let id = activeLayouts[screen.displayID] ?? store.config.lastLayoutID
-        return layouts.first { $0.id == id } ?? layouts.first ?? Layout(name: "Halves", ratios: [50, 50])
+        return layouts.first { $0.id == id } ?? id.flatMap { unsavedLayouts[$0] } ?? layouts.first ?? Layout(name: "Halves", ratios: [50, 50])
     }
 
     private func snapshots(_ windows: [ManagedWindow]) -> [WindowSnapshot] {
