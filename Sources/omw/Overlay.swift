@@ -220,6 +220,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
     private let store: ConfigStore
     private let manager: WindowManager
     private let openSettings: (UUID?) -> Void
+    /// The display layouts are applied to. The panel itself may sit on the primary display instead.
     private var screen: NSScreen?
     private var keyMonitor: Any?
 
@@ -252,7 +253,9 @@ final class OverlayController: NSObject, NSWindowDelegate {
         loadTarget()
         model.reset(items: items())
 
-        if let visible = screen?.visibleFrame {
+        // The first screen is the one with the menu bar; NSScreen.main is the one with the key window.
+        let panelScreen = store.config.launcherOnPrimaryDisplay ? NSScreen.screens.first ?? screen : screen
+        if let visible = panelScreen?.visibleFrame {
             let size = panel.frame.size
             panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2,
                                          y: visible.midY - size.height / 2))

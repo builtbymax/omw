@@ -21,6 +21,8 @@ public struct Config: Codable, Equatable {
     public var showHUD: Bool
     /// Off hides the status item; Settings stay reachable via the launcher or by reopening omw.
     public var showMenuBarIcon: Bool
+    /// Open the launcher panel on the primary display. Layouts still go to the focused window's display.
+    public var launcherOnPrimaryDisplay: Bool
     public var lastLayoutID: UUID?
 
     public init(
@@ -39,6 +41,7 @@ public struct Config: Codable, Equatable {
         animate: Bool = true,
         showHUD: Bool = true,
         showMenuBarIcon: Bool = true,
+        launcherOnPrimaryDisplay: Bool = false,
         lastLayoutID: UUID? = nil
     ) {
         self.layouts = layouts
@@ -56,13 +59,14 @@ public struct Config: Codable, Equatable {
         self.animate = animate
         self.showHUD = showHUD
         self.showMenuBarIcon = showMenuBarIcon
+        self.launcherOnPrimaryDisplay = launcherOnPrimaryDisplay
         self.lastLayoutID = lastLayoutID
     }
 
     private enum CodingKeys: String, CodingKey {
         case layouts, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
         case moveToNextDisplayShortcut, moveToPreviousDisplayShortcut, moveToNextSpaceShortcut, moveToPreviousSpaceShortcut
-        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, lastLayoutID
+        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, lastLayoutID
     }
 
     /// Missing keys fall back to defaults, an explicit `null` shortcut stays disabled.
@@ -87,6 +91,7 @@ public struct Config: Codable, Equatable {
         animate = try c.decodeIfPresent(Bool.self, forKey: .animate) ?? d.animate
         showHUD = try c.decodeIfPresent(Bool.self, forKey: .showHUD) ?? d.showHUD
         showMenuBarIcon = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? d.showMenuBarIcon
+        launcherOnPrimaryDisplay = try c.decodeIfPresent(Bool.self, forKey: .launcherOnPrimaryDisplay) ?? d.launcherOnPrimaryDisplay
         lastLayoutID = try c.decodeIfPresent(UUID.self, forKey: .lastLayoutID)
     }
 
@@ -107,6 +112,7 @@ public struct Config: Codable, Equatable {
         try c.encode(animate, forKey: .animate)
         try c.encode(showHUD, forKey: .showHUD)
         try c.encode(showMenuBarIcon, forKey: .showMenuBarIcon)
+        try c.encode(launcherOnPrimaryDisplay, forKey: .launcherOnPrimaryDisplay)
         try c.encodeIfPresent(lastLayoutID, forKey: .lastLayoutID)
     }
 }

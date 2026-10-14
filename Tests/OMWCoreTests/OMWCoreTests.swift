@@ -266,8 +266,10 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
     @Test func clearedShortcutsStayCleared() throws {
         var config = Config()
         config.moveLeftShortcut = nil
+        config.launcherOnPrimaryDisplay = true
         let decoded = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(config))
         #expect(decoded.moveLeftShortcut == nil)
+        #expect(decoded.launcherOnPrimaryDisplay)
         #expect(decoded.moveRightShortcut == config.moveRightShortcut)
 
         let minimal = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))

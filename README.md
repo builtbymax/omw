@@ -21,6 +21,9 @@ All shortcuts can be changed in **Settings** (menu bar icon → Settings…), an
 - While you browse, dashed ghost columns show the selected layout on the real display, and the
   preview pane lists which app lands in which column.
 - The display chip next to the search field (or `⌘D`) switches the target display when you have more than one.
+- The launcher opens on the display with the focused window. With **Open launcher on primary display**
+  (Settings → General) it always opens on the display with the menu bar, while layouts still go to the
+  focused window's display, shown in the display chip.
 - `⌘K` opens the actions for the selected item (apply, edit the layout in Settings, undo), `⌘E` edits
   the selected layout, `⌘,` opens Settings.
 

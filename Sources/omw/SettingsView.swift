@@ -306,6 +306,9 @@ private struct GeneralSettings: View {
                 SettingsRow(.undo, "Show confirmation", subtitle: "\u{201C}Arranged N windows\u{201D} with Undo after applying a layout.") {
                     Toggle("", isOn: $store.config.showHUD).toggleStyle(.switch).labelsHidden()
                 }
+                SettingsRow(.display, "Open launcher on primary display", subtitle: "Instead of the display with the focused window.") {
+                    Toggle("", isOn: $store.config.launcherOnPrimaryDisplay).toggleStyle(.switch).labelsHidden()
+                }
             }
 
             if updater.isAvailable {
