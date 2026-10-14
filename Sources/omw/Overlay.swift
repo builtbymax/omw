@@ -381,7 +381,13 @@ final class OverlayController: NSObject, NSWindowDelegate {
                 actionTitle: "Apply Layout"
             ) { [weak self] in self?.apply(layout.id) }
         }
-        var commands = WindowCommand.allCases.map { command in
+        var commands: [OverlayItem] = []
+        if let version = Updater.shared.pendingVersion {
+            commands.append(OverlayItem(id: "update", title: "Install Update (\(version))", section: .commands, icon: .tile(.update),
+                                        detail: "Downloads omw \(version), installs it and relaunches omw.",
+                                        actionTitle: "Update") { Updater.shared.checkForUpdates() })
+        }
+        commands += WindowCommand.allCases.map { command in
             OverlayItem(id: command.rawValue, title: command.title, keys: config[keyPath: command.keyPath]?.displayKeys ?? [],
                         section: .commands, icon: .tile(command.style), detail: command.detail,
                         actionTitle: "Move Window") { [weak self] in self?.manager.perform(command) }
@@ -409,6 +415,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
 
 struct OverlayView: View {
     @ObservedObject var model: OverlayModel
+    @ObservedObject private var updater = Updater.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -545,7 +552,16 @@ struct OverlayView: View {
         HStack(spacing: 10) {
             AppIconView(size: 22)
             Text("omw").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
-            Text("·  \(model.status)").font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+            if let version = updater.reminderVersion {
+                UpdateBanner(version: version) {
+                    model.onClose()
+                    updater.checkForUpdates()
+                } dismiss: {
+                    withAnimation(.easeOut(duration: 0.15)) { updater.dismissReminder() }
+                }
+            } else {
+                Text("·  \(model.status)").font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+            }
             Spacer()
             if let selected = model.selected {
                 Button(selected.actionTitle) { model.submit() }
@@ -561,6 +577,33 @@ struct OverlayView: View {
         .padding(.trailing, 12)
         .frame(height: 50)
         .background(Color.white.opacity(0.03))
+    }
+}
+
+/// "0.3.0 available · Update" in the footer while an update is pending. Takes the status text's place,
+/// so the list and preview don't move.
+private struct UpdateBanner: View {
+    let version: String
+    let update: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.down.circle.fill").font(.system(size: 12)).foregroundStyle(Theme.accentText)
+            Text("\(version) available").font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.85))
+            Button("Update", action: update)
+                .buttonStyle(.glassCapsule(.primary))
+            Button(action: dismiss) {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.5))
+            }
+            .buttonStyle(.hoverable)
+            .help("Hide until the next version")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 8)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Theme.accentText.opacity(0.1)))
+        .overlay(Capsule().strokeBorder(Theme.accentText.opacity(0.25)))
     }
 }
 
