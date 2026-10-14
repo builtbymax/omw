@@ -213,18 +213,21 @@ struct IconTile: View {
 
 struct Keycap: View {
     let key: String
+    /// Smaller keys for use inside chips.
+    var compact = false
 
-    init(_ key: String) {
+    init(_ key: String, compact: Bool = false) {
         self.key = key
+        self.compact = compact
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: compact ? 5 : 6, style: .continuous)
         Text(key)
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: compact ? 10 : 11, weight: .medium))
             .foregroundStyle(.primary.opacity(0.85))
-            .padding(.horizontal, 6)
-            .frame(minWidth: 22, minHeight: 22)
+            .padding(.horizontal, compact ? 4 : 6)
+            .frame(minWidth: compact ? 17 : 22, minHeight: compact ? 17 : 22)
             .background(shape.fill(LinearGradient(colors: [.primary.opacity(0.16), .primary.opacity(0.07)], startPoint: .top, endPoint: .bottom)))
             .overlay(shape.strokeBorder(Theme.rim(0.3, 0.05), lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 0, y: 1)
@@ -233,10 +236,11 @@ struct Keycap: View {
 
 struct Keycaps: View {
     let keys: [String]
+    var compact = false
 
     var body: some View {
-        HStack(spacing: 3) {
-            ForEach(Array(keys.enumerated()), id: \.offset) { Keycap($0.element) }
+        HStack(spacing: compact ? 2 : 3) {
+            ForEach(Array(keys.enumerated()), id: \.offset) { Keycap($0.element, compact: compact) }
         }
     }
 }

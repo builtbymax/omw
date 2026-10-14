@@ -448,20 +448,22 @@ struct OverlayView: View {
                 }
             }
             if !model.screenName.isEmpty {
-                if model.canSwitchScreen && !model.switchScreenKeys.isEmpty {
-                    Keycaps(keys: model.switchScreenKeys)
-                }
+                // The switch shortcut sits inside the chip so it reads as the chip's action.
+                let showsKeys = model.canSwitchScreen && !model.switchScreenKeys.isEmpty
                 Button { model.onSwitchScreen() } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "display").font(.system(size: 11))
                         Text(model.screenName).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                        if model.canSwitchScreen {
+                        if showsKeys {
+                            Keycaps(keys: model.switchScreenKeys, compact: true).padding(.leading, 2)
+                        } else if model.canSwitchScreen {
                             Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).opacity(0.6)
                         }
                     }
                     .foregroundStyle(.white.opacity(0.75))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                    .padding(.leading, 10)
+                    .padding(.trailing, showsKeys ? 6 : 10)
+                    .padding(.vertical, showsKeys ? 4 : 5)
                     .background(Capsule().fill(.white.opacity(0.08)))
                     .overlay(Capsule().strokeBorder(Theme.rim(0.2, 0.04)))
                 }
