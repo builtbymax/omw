@@ -255,7 +255,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
         if let visible = screen?.visibleFrame {
             let size = panel.frame.size
             panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2,
-                                         y: visible.maxY - visible.height * 0.16 - size.height))
+                                         y: visible.midY - size.height / 2))
         }
         panel.makeKeyAndOrderFront(nil)
         panel.invalidateShadow()
