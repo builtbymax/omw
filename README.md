@@ -44,7 +44,8 @@ Settings → General.
 Built in: Halves `50/50`, Thirds `33/33/33`, Code `20/60/20`, Main Left `70/30`, Main Right `30/70`, Full `100`,
 Center `_20/60/_20`.
 Add or edit layouts in Settings, columns are written like `20/60/20` or `1:2:1`, or drag the
-column edges in the blueprint preview (they snap to 5%).
+column edges in the blueprint preview (they snap to 5%). A typed spec is applied when you press `↩` or leave the
+field, `esc` discards it, and the field explains what's wrong with an invalid spec.
 
 A column can be split into up to 4 equal rows: `2x20/60/2x20` gives two stacked windows on each side of a
 wide middle column. A column written as `_20` stays empty: `_20/60/_20` puts windows in a centered 60% column

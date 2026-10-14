@@ -212,6 +212,43 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(Layout.parse("") == nil)
     }
 
+    @Test func explainsInvalidColumns() {
+        func error(_ text: String) -> ColumnSpecError? {
+            if case let .failure(error) = Layout.validate(text) { error } else { nil }
+        }
+        #expect(error("") == .empty)
+        #expect(error("20/x/20") == .invalidColumn("x"))
+        #expect(error("0/100") == .zeroWidth("0"))
+        #expect(error("5x20/80") == .tooManyRows("5x20"))
+        #expect(error("_2x20/80") == .rowsInEmptyColumn("_2x20"))
+        #expect(error("_50/_50") == .noWindows)
+        #expect(error("1/1/1/1/1/1/1/1/1") == .tooManyColumns)
+        #expect(error("2x20/60/_20") == nil)
+    }
+
+    @Test func typedColumnsKeepPins() throws {
+        var code = Layout(name: "Code", ratios: [20, 60, 20], pins: ["vscode": 1, "slack": 0, "music": 2])
+        // Typing the same columns again changes nothing.
+        #expect(code.applying(columns: "20 / 60 / 20") == code)
+        // Rows shift the cell numbers, but every app stays in its column.
+        let rows = try #require(code.applying(columns: "2x20/60/2x20"))
+        #expect(rows.pins == ["slack": 0, "vscode": 2, "music": 3])
+        #expect(try #require(rows.applying(columns: "20/60/20")).pins == code.pins)
+        // Ratios that aren't percentages only change the widths.
+        code.pins = ["vscode": 1]
+        #expect(try #require(code.applying(columns: "1:2:1")).pins == ["vscode": 1])
+        #expect(code.applying(columns: "20/")?.pins == ["vscode": 0])
+        #expect(code.applying(columns: "20/x") == nil)
+    }
+
+    @Test func showsPercentsOnlyWhenTheyDiffer() {
+        #expect(Layout(name: "x", ratios: [1, 2, 1]).percentLabel == "25 / 50 / 25 %")
+        #expect(Layout(name: "x", ratios: [30, 30]).percentLabel == "50 / 50 %")
+        #expect(Layout(name: "x", ratios: [1, 1, 1]).percentLabel == "33.3 / 33.3 / 33.3 %")
+        #expect(Layout(name: "x", ratios: [20, 60, 20]).percentLabel == nil)
+        #expect(Layout(name: "x", ratios: [33.33, 33.33, 33.33]).percentLabel == nil)
+    }
+
     @Test func labelsAndFractions() {
         #expect(Layout(name: "Thirds", ratios: [33.33, 33.33, 33.33]).ratioLabel == "33/33/33")
         #expect(Layout(name: "x", ratios: [1, 3]).fractions == [0.25, 0.75])

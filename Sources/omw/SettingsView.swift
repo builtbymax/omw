@@ -210,6 +210,7 @@ private struct SettingsRow<Leading: View, Trailing: View>: View {
                         Text(subtitle)
                             .font(.system(size: 11, design: monoSubtitle ? .monospaced : .default))
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 12)
@@ -230,24 +231,72 @@ extension SettingsRow where Leading == IconTile {
     }
 }
 
-/// Plain text field on a dark inset, for the layout's name and columns.
+/// Plain text field on a dark inset, for the layout's columns. Changes are committed on Return or
+/// when the field loses focus, Escape throws them away.
 private struct InsetField: View {
     @Binding var text: String
     var prompt = ""
     var mono = false
     var invalid = false
+    var onCommit: () -> Void = {}
+    var onCancel: () -> Void = {}
+    @FocusState private var focused: Bool
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
         TextField("", text: $text, prompt: Text(prompt))
             .textFieldStyle(.plain)
             .font(.system(size: 12, weight: .medium, design: mono ? .monospaced : .default))
-            .multilineTextAlignment(.trailing)
             .foregroundStyle(invalid ? Color.red : Color.primary)
+            .focused($focused)
+            .onSubmit(onCommit)
+            .onExitCommand(perform: onCancel)
+            .onChange(of: focused) { _, focused in if !focused { onCommit() } }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .frame(width: 180)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.black.opacity(0.18)))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(invalid ? Color.red.opacity(0.6) : .primary.opacity(0.1)))
+            .frame(width: 220)
+            .background(shape.fill(.black.opacity(0.18)))
+            .overlay(shape.strokeBorder(invalid ? Color.red.opacity(0.6) : (focused ? Theme.accentTop.opacity(0.7) : .primary.opacity(0.1)),
+                                        lineWidth: focused && !invalid ? 1.5 : 1))
+            .animation(.easeOut(duration: 0.12), value: focused)
+    }
+}
+
+/// ⓘ next to the Columns field: the syntax with an example per feature.
+private struct ColumnsHelp: View {
+    @State private var shown = false
+
+    private let examples: [(spec: String, meaning: String)] = [
+        ("20/60/20", "Three columns in percent"),
+        ("1:2:1", "Ratios, the same as 25/50/25"),
+        ("2x20/60/2x20", "2x splits a column into rows (up to \(Layout.maxRows))"),
+        ("_20/60/_20", "_ leaves a column empty"),
+    ]
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            Image(systemName: "info.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.hoverable)
+        .help("Column syntax")
+        .popover(isPresented: $shown, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Columns").font(.system(size: 13, weight: .semibold))
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                    ForEach(examples, id: \.spec) { example in
+                        GridRow {
+                            Text(example.spec).font(.system(size: 12, weight: .medium, design: .monospaced))
+                            Text(example.meaning).font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Text("Press Return to apply, Esc to undo the edit.").font(.system(size: 11)).foregroundStyle(.tertiary)
+            }
+            .padding(14)
+        }
     }
 }
 
@@ -667,7 +716,19 @@ private struct LayoutDetail: View {
     @ObservedObject private var hotkeys = HotkeyCenter.shared
     @State private var ratioText = ""
 
-    private var ratiosValid: Bool { Layout.parse(ratioText) != nil }
+    private var columnsError: String? {
+        if case let .failure(error) = Layout.validate(ratioText) { error.message } else { nil }
+    }
+
+    /// A reminder to press Return, or the widths in percent when they're written differently.
+    /// Always some text, so the row keeps its height while typing.
+    private var columnsStatus: String {
+        guard let typed = layout.applying(columns: ratioText) else { return "Widths from left to right." }
+        let pending = typed.ratios != layout.ratios || typed.rowCounts != layout.rowCounts
+        let percents = typed.percentLabel.map { "On screen: \($0)" }
+        guard pending else { return percents ?? "Widths from left to right." }
+        return ["Press Return to apply", percents].compactMap { $0 }.joined(separator: " · ")
+    }
 
     var body: some View {
         ScrollPage(leading: 14) {
@@ -695,8 +756,29 @@ private struct LayoutDetail: View {
             }
 
             SettingsSection(title: "Layout") {
-                SettingsRow(title: "Columns", divider: false) { EmptyView() } trailing: {
-                    InsetField(text: $ratioText, prompt: "20/60/20", mono: true, invalid: !ratiosValid)
+                SettingsRow(title: "Columns", subtitle: columnsStatus, divider: false) {
+                    EmptyView()
+                } trailing: {
+                    HStack(spacing: 8) {
+                        InsetField(text: $ratioText, prompt: "20/60/20", mono: true, invalid: columnsError != nil,
+                                   onCommit: commitColumns, onCancel: { ratioText = layout.ratioLabel })
+                        ColumnsHelp()
+                    }
+                }
+                if let columnsError {
+                    // Its own row, so the field above doesn't move while the message changes.
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(columnsError).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(hex: 0xFF6B61))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(hex: 0xFF453A, opacity: 0.1))
+                    .overlay(alignment: .top) { Rectangle().fill(.primary.opacity(0.07)).frame(height: 1) }
                 }
                 SettingsRow(title: "Shortcut") { EmptyView() } trailing: {
                     ShortcutRecorder(shortcut: $layout.shortcut, isTaken: layout.shortcut.map(hotkeys.failed.contains) ?? false)
@@ -738,12 +820,14 @@ private struct LayoutDetail: View {
             }
         }
         .onAppear { ratioText = layout.ratioLabel }
-        .onChange(of: ratioText) { _, text in
-            guard let parsed = Layout.parse(text), parsed.ratios != layout.ratios || parsed.rows != layout.rows else { return }
-            layout = layout.restructured(ratios: parsed.ratios, rows: parsed.rows)
-        }
         .onChange(of: layout.ratios) { _, _ in syncRatioText() }
         .onChange(of: layout.rowCounts) { _, _ in syncRatioText() }
+    }
+
+    /// Applies the typed columns in one go, so pins and the blueprint never see half-typed specs.
+    private func commitColumns() {
+        guard let typed = layout.applying(columns: ratioText), typed != layout else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { layout = typed }
     }
 
     /// Dragging and the row buttons in the blueprint update the text field.

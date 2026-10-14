@@ -218,20 +218,54 @@ public struct Layout: Codable, Identifiable, Hashable {
     /// Parses "20/60/20", "20 60 20" or "1:2:1" into ratios, "2x20/60/2x20" into ratios with rows,
     /// and "_20/60/_20" with empty columns (0 rows).
     public static func parse(_ text: String) -> (ratios: [Double], rows: [Int])? {
+        try? validate(text).get()
+    }
+
+    /// Like `parse`, but says what's wrong with the text.
+    public static func validate(_ text: String) -> Result<(ratios: [Double], rows: [Int]), ColumnSpecError> {
         let normalized = text.replacingOccurrences(of: "\\s*[x×]\\s*", with: "x", options: [.regularExpression, .caseInsensitive])
         let parts = normalized.split { "/ ,:|".contains($0) }
+        guard !parts.isEmpty else { return .failure(.empty) }
+        guard parts.count <= maxColumns else { return .failure(.tooManyColumns) }
         var ratios: [Double] = [], rows: [Int] = []
         for part in parts {
+            let column = String(part)
             let empty = part.hasPrefix("_")
             let pieces = part.dropFirst(empty ? 1 : 0).lowercased().split(separator: "x", omittingEmptySubsequences: false)
-            guard let value = pieces.last.flatMap({ Double($0) }), value > 0, pieces.count <= 2, !(empty && pieces.count == 2) else { return nil }
-            let count = empty ? 0 : (pieces.count == 2 ? Int(pieces[0]) : 1)
-            guard let count, (0...maxRows).contains(count) else { return nil }
+            guard pieces.count <= 2, let value = pieces.last.flatMap({ Double($0) }), value.isFinite else {
+                return .failure(.invalidColumn(column))
+            }
+            guard value > 0 else { return .failure(.zeroWidth(column)) }
+            if empty && pieces.count == 2 { return .failure(.rowsInEmptyColumn(column)) }
+            guard let count = empty ? 0 : (pieces.count == 2 ? Int(pieces[0]) : 1), count >= 0 else {
+                return .failure(.invalidColumn(column))
+            }
+            guard count <= maxRows else { return .failure(.tooManyRows(column)) }
             ratios.append(value)
             rows.append(count)
         }
-        guard !ratios.isEmpty, ratios.count <= maxColumns, rows.contains(where: { $0 > 0 }) else { return nil }
-        return (ratios, rows.contains { $0 != 1 } ? rows : [])
+        guard rows.contains(where: { $0 > 0 }) else { return .failure(.noWindows) }
+        return .success((ratios, rows.contains { $0 != 1 } ? rows : []))
+    }
+
+    /// The layout with the columns from `text`, pins following their column. Nil if the text isn't valid.
+    /// Apply it once the whole text is typed: every intermediate state would remap the pins again.
+    public func applying(columns text: String) -> Layout? {
+        guard let parsed = Self.parse(text) else { return nil }
+        let candidate = restructured(ratios: parsed.ratios, rows: parsed.rows)
+        return candidate.ratios == ratios && candidate.rowCounts == rowCounts ? self : candidate
+    }
+
+    /// "25 / 50 / 25 %", the widths as they end up on screen. Nil when the ratios already are percentages.
+    public var percentLabel: String? {
+        let percents = fractions.map { $0 * 100 }
+        guard percents.count == ratios.count,
+              zip(percents, ratios).contains(where: { abs($0 - $1) >= 0.05 }) else { return nil }
+        let values = percents.map { p in
+            let rounded = (p * 10).rounded() / 10
+            return rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
+        }
+        return values.joined(separator: " / ") + " %"
     }
 
     public static let defaults: [Layout] = [
@@ -243,4 +277,27 @@ public struct Layout: Codable, Identifiable, Hashable {
         Layout(name: "Full", ratios: [100]),
         Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0]),
     ]
+}
+
+/// Why a column spec like "20/60/20" can't be used.
+public enum ColumnSpecError: Error, Equatable {
+    case empty
+    case tooManyColumns
+    case invalidColumn(String)
+    case zeroWidth(String)
+    case tooManyRows(String)
+    case rowsInEmptyColumn(String)
+    case noWindows
+
+    public var message: String {
+        switch self {
+        case .empty: "Enter column widths, e.g. 50/50."
+        case .tooManyColumns: "At most \(Layout.maxColumns) columns."
+        case let .invalidColumn(column): "\u{201C}\(column)\u{201D} isn't a column. Use a width like 20, 2x20 or _20."
+        case let .zeroWidth(column): "\u{201C}\(column)\u{201D} needs a width above 0."
+        case let .tooManyRows(column): "\u{201C}\(column)\u{201D}: a column has at most \(Layout.maxRows) rows."
+        case let .rowsInEmptyColumn(column): "\u{201C}\(column)\u{201D}: an empty column can't have rows."
+        case .noWindows: "At least one column needs to take windows."
+        }
+    }
 }
