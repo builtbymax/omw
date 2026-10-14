@@ -1,6 +1,27 @@
 import AppKit
 import OMWCore
 
+/// Why a window command did nothing. Hotkeys beep, the CLI prints the message.
+enum ActionError: Error {
+    case notTrusted, noDisplay, noFocusedWindow, edge, singleDisplay, noNewWindows, nothingToUndo
+    case noSpace, spaceShortcutOff(right: Bool)
+
+    var message: String {
+        switch self {
+        case .notTrusted: "omw needs Accessibility access: System Settings → Privacy & Security → Accessibility."
+        case .noDisplay: "No display found."
+        case .noFocusedWindow: "No focused window to move."
+        case .edge: "There's no column or row in that direction."
+        case .singleDisplay: "There's only one display."
+        case .noNewWindows: "No new windows to place."
+        case .nothingToUndo: "Nothing to undo."
+        case .noSpace: "There's no workspace in that direction."
+        case let .spaceShortcutOff(right):
+            "The Mission Control shortcut \u{201C}Move \(right ? "right" : "left") a space\u{201D} is turned off in System Settings → Keyboard → Keyboard Shortcuts."
+        }
+    }
+}
+
 @MainActor
 final class WindowManager {
     private let store: ConfigStore
@@ -26,8 +47,11 @@ final class WindowManager {
         screen.flatMap { activeLayouts[$0.displayID] }
     }
 
-    func apply(_ layout: Layout, on target: NSScreen? = nil) {
-        guard ensureTrusted(), let screen = target ?? AX.targetScreen() else { return }
+    /// The number of windows that were arranged, and on which display.
+    @discardableResult
+    func apply(_ layout: Layout, on target: NSScreen? = nil) -> Result<(count: Int, screen: NSScreen), ActionError> {
+        guard ensureTrusted() else { return .failure(.notTrusted) }
+        guard let screen = target ?? AX.targetScreen() else { return .failure(.noDisplay) }
         let windows = AX.visibleWindows(on: screen).filter { layout.arranges(appID: $0.bundleID) }
         let area = screen.axVisibleFrame
         let assignment = Arranger.assign(snapshots(windows), layout: layout, in: area, pinned: true, balanced: true)
@@ -37,12 +61,15 @@ final class WindowManager {
         arrangedWindows[screen.displayID] = Set(windows.map(\.windowID))
         store.config.lastLayoutID = layout.id
         onArranged?(layout, windows.count, screen)
+        return .success((windows.count, screen))
     }
 
     /// Places windows opened since the active layout was applied, without touching the ones already in it.
     /// Windows that already fill a cell count as placed too, so this also works after omw restarted.
-    func refresh(on target: NSScreen? = nil) {
-        guard ensureTrusted(), let screen = target ?? AX.targetScreen() else { return }
+    @discardableResult
+    func refresh(on target: NSScreen? = nil) -> Result<Int, ActionError> {
+        guard ensureTrusted() else { return .failure(.notTrusted) }
+        guard let screen = target ?? AX.targetScreen() else { return .failure(.noDisplay) }
         let layout = layout(for: screen)
         let area = screen.axVisibleFrame
         let cells = Arranger.cells(for: layout, in: area, gap: store.config.gap)
@@ -52,7 +79,7 @@ final class WindowManager {
         let new = windows.filter { !arranged.contains($0.windowID) }
         guard !new.isEmpty else {
             NSSound.beep()
-            return
+            return .failure(.noNewWindows)
         }
         let existing = windows.filter { arranged.contains($0.windowID) }
         let assignment = Arranger.assignNew(snapshots(new), existing: snapshots(existing), layout: layout, in: area)
@@ -61,6 +88,7 @@ final class WindowManager {
         activeLayouts[screen.displayID] = layout.id
         arrangedWindows[screen.displayID] = arranged.union(new.map(\.windowID))
         onArranged?(layout, new.count, screen)
+        return .success(new.count)
     }
 
     /// Apps round frames to their own size steps (e.g. terminals), so allow some slack.
@@ -70,8 +98,9 @@ final class WindowManager {
     }
 
     /// Puts the windows of the last arrange back where they were.
-    func undo() {
-        guard let state = undoState else { return }
+    @discardableResult
+    func undo() -> ActionError? {
+        guard let state = undoState else { return .nothingToUndo }
         undoState = nil
         // The windows sit in their columns now, so the moves start from there.
         let moves = state.moves.compactMap { move -> (ManagedWindow, CGRect)? in
@@ -81,30 +110,34 @@ final class WindowManager {
         animator.run(moves, animated: store.config.animate)
         activeLayouts[state.displayID] = state.layoutID
         arrangedWindows[state.displayID] = state.arranged
+        return nil
     }
 
     /// Moves the focused window one cell left/right (dx) or up/down (dy), swapping it with the window that's there.
-    func moveFocused(dx: Int, dy: Int) {
-        guard ensureTrusted(),
-              let focused = AX.focusedWindow(),
+    @discardableResult
+    func moveFocused(dx: Int, dy: Int) -> ActionError? {
+        guard ensureTrusted() else { return .notTrusted }
+        guard let focused = AX.focusedWindow(),
               let focusedID = AX.windowID(of: focused),
-              let screen = AX.targetScreen() else { return }
+              let screen = AX.targetScreen() else { return .noFocusedWindow }
         let layout = layout(for: screen)
         let windows = AX.visibleWindows(on: screen)
-        guard let index = windows.firstIndex(where: { $0.windowID == focusedID }) else { return }
+        guard let index = windows.firstIndex(where: { $0.windowID == focusedID }) else { return .noFocusedWindow }
 
         let area = screen.axVisibleFrame
         let current = Arranger.assign(snapshots(windows), layout: layout, in: area, pinned: false, balanced: false)
         guard let next = Arranger.move(index, dx: dx, dy: dy, in: current, layout: layout) else {
             NSSound.beep()
-            return
+            return .edge
         }
         place(windows, next, layout: layout, area: area)
         activeLayouts[screen.displayID] = layout.id
         arrangedWindows[screen.displayID] = Set(windows.map(\.windowID))
+        return nil
     }
 
-    func perform(_ command: WindowCommand) {
+    @discardableResult
+    func perform(_ command: WindowCommand) -> ActionError? {
         switch command {
         case .moveLeft: moveFocused(dx: -1, dy: 0)
         case .moveRight: moveFocused(dx: 1, dy: 0)
@@ -118,27 +151,29 @@ final class WindowManager {
     }
 
     /// In a column with rows, the row above or below. Otherwise the top half, bottom half or full height of the column.
-    private func moveFocusedVertically(_ direction: Int) {
-        guard ensureTrusted(), let window = AX.focusedManagedWindow(), let screen = AX.screen(containing: window.frame) else { return }
+    private func moveFocusedVertically(_ direction: Int) -> ActionError? {
+        guard ensureTrusted() else { return .notTrusted }
+        guard let window = AX.focusedManagedWindow(), let screen = AX.screen(containing: window.frame) else { return .noFocusedWindow }
         let layout = layout(for: screen)
         let area = screen.axVisibleFrame
         let index = layout.nearestFilledColumn(to: Arranger.columnIndex(forX: window.frame.midX, layout: layout, in: area))
         if layout.rowCounts[index] > 1 {
-            moveFocused(dx: 0, dy: direction)
-            return
+            return moveFocused(dx: 0, dy: direction)
         }
         let column = Arranger.columns(for: layout, in: area, gap: store.config.gap)[index]
         let target = Arranger.verticalSlot(for: window.frame, in: column, direction: direction, gap: store.config.gap)
         animator.run([(window, target)], animated: store.config.animate)
+        return nil
     }
 
     /// Moves the focused window to the cell at the same relative position on the display left (-1) or right (+1) of its current one.
-    private func moveFocusedToDisplay(by delta: Int) {
-        guard ensureTrusted(), let window = AX.focusedManagedWindow(), let source = AX.screen(containing: window.frame) else { return }
-        let screens = NSScreen.screens.sorted { ($0.frame.minX, $0.frame.minY) < ($1.frame.minX, $1.frame.minY) }
+    private func moveFocusedToDisplay(by delta: Int) -> ActionError? {
+        guard ensureTrusted() else { return .notTrusted }
+        guard let window = AX.focusedManagedWindow(), let source = AX.screen(containing: window.frame) else { return .noFocusedWindow }
+        let screens = NSScreen.leftToRight
         guard screens.count > 1, let index = screens.firstIndex(of: source) else {
             NSSound.beep()
-            return
+            return .singleDisplay
         }
         let target = screens[(index + delta + screens.count) % screens.count]
         let from = source.axVisibleFrame, to = target.axVisibleFrame
@@ -149,11 +184,13 @@ final class WindowManager {
         let cell = Arranger.cellIndex(at: point, layout: layout, in: to)
         // Across displays it jumps: gliding over the gap between screens looks broken.
         AX.setFrame(window, to: Arranger.cells(for: layout, in: to, gap: store.config.gap)[cell])
+        return nil
     }
 
-    private func moveFocusedToSpace(by delta: Int) {
-        guard ensureTrusted(), let window = AX.focusedManagedWindow() else { return }
-        SpaceMover.move(window, by: delta)
+    private func moveFocusedToSpace(by delta: Int) -> ActionError? {
+        guard ensureTrusted() else { return .notTrusted }
+        guard let window = AX.focusedManagedWindow() else { return .noFocusedWindow }
+        return SpaceMover.move(window, by: delta)
     }
 
     private func layout(for screen: NSScreen) -> Layout {

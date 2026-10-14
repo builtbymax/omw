@@ -167,6 +167,11 @@ extension NSScreen {
     var axFrame: CGRect { Self.toAX(frame) }
     var axVisibleFrame: CGRect { Self.toAX(visibleFrame) }
 
+    /// Displays as arranged in System Settings, left to right. The CLI numbers them in this order.
+    static var leftToRight: [NSScreen] {
+        screens.sorted { ($0.frame.minX, $0.frame.minY) < ($1.frame.minX, $1.frame.minY) }
+    }
+
     private static func toAX(_ rect: NSRect) -> CGRect {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? rect.maxY
         return CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)

@@ -70,6 +70,29 @@ Layout 20/60/20, windows: Slack, VSCode, Claude, Spotify, Linear
 - Only windows on the current desktop and on the display of the focused window are touched.
   Minimized, hidden and full-screen windows are left alone.
 
+### Command line
+
+The `omw` CLI drives the running app from scripts, Shortcuts, Raycast, Alfred or a login item. Install it in
+Settings → General → Command line, which links `/usr/local/bin/omw` to the copy inside omw.app (asks for an
+admin password if needed), so it stays up to date with the app.
+
+```sh
+omw apply code                    # by name or ratios, like the launcher: "halves", "20/60", "1:2:1"
+omw apply 20/60/20 --display 2    # display by number (see `omw displays`) or name
+omw move left|right|up|down       # the focused window, like the hotkeys
+omw move --display next|previous
+omw move --space next|previous
+omw refresh                       # place windows opened since the layout was applied
+omw undo
+omw layouts                       # name, ratios and id of every layout
+omw displays
+omw open                          # show the launcher
+omw reload                        # re-read config.json
+```
+
+Exit codes: `0` done, `1` the command failed (unknown layout, no Accessibility access, no workspace in
+that direction…), `2` wrong usage, `3` omw isn't running. Errors go to stderr.
+
 ## Install
 
 Requires macOS 14+ and the Swift toolchain (Xcode or the Command Line Tools).

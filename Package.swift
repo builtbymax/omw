@@ -18,6 +18,8 @@ let package = Package(
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
             ]
         ),
+        // The `omw` command-line tool. scripts/bundle.sh puts it into omw.app/Contents/Helpers/omw.
+        .executableTarget(name: "omw-cli", dependencies: ["OMWCore"]),
         .testTarget(name: "OMWCoreTests", dependencies: ["OMWCore"]),
     ],
     swiftLanguageModes: [.v5]

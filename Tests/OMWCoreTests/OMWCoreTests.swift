@@ -328,3 +328,52 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(Fuzzy.score("ha", in: "Halves")! > Fuzzy.score("lv", in: "Halves")!)
     }
 }
+
+@Suite struct RemoteTests {
+    @Test func parsesCommands() throws {
+        #expect(try RemoteCommand.parse(["apply", "code"]) == .apply(layout: "code", display: nil))
+        #expect(try RemoteCommand.parse(["apply", "main", "left", "--display", "2"]) == .apply(layout: "main left", display: "2"))
+        #expect(try RemoteCommand.parse(["apply", "-d", "DELL", "20/60/20"]) == .apply(layout: "20/60/20", display: "DELL"))
+        #expect(try RemoteCommand.parse(["move", "left"]) == .move(.left))
+        #expect(try RemoteCommand.parse(["move", "--display", "next"]) == .move(.nextDisplay))
+        #expect(try RemoteCommand.parse(["move", "--space", "previous"]) == .move(.previousSpace))
+        #expect(try RemoteCommand.parse(["undo"]) == .undo)
+        #expect(throws: UsageError.self) { try RemoteCommand.parse(["apply"]) }
+        #expect(throws: UsageError.self) { try RemoteCommand.parse(["apply", "code", "--display"]) }
+        #expect(throws: UsageError.self) { try RemoteCommand.parse(["move", "sideways"]) }
+        #expect(throws: UsageError.self) { try RemoteCommand.parse(["undo", "twice"]) }
+        #expect(throws: UsageError.self) { try RemoteCommand.parse(["dance"]) }
+    }
+
+    @Test func findsLayoutsLikeTheLauncher() {
+        let layouts = Layout.defaults
+        #expect(Layout.find("code", in: layouts)?.name == "Code")
+        #expect(Layout.find("MAIN LEFT", in: layouts)?.name == "Main Left")
+        #expect(Layout.find("1:1", in: layouts)?.name == "Halves")
+        #expect(Layout.find("1:1:1", in: layouts)?.name == "Thirds")
+        #expect(Layout.find("_20/60/_20", in: layouts)?.name == "Center")
+        #expect(Layout.find("20/60", in: layouts)?.name == "Code")
+        #expect(Layout.find("halv", in: layouts)?.name == "Halves")
+        #expect(Layout.find(layouts[3].id.uuidString, in: layouts)?.name == "Main Left")
+        #expect(Layout.find("qqq", in: layouts) == nil)
+    }
+
+    @Test func roundTripsOverTheSocket() throws {
+        let path = NSTemporaryDirectory() + "omw-test-\(UUID().uuidString.prefix(8)).sock"
+        #expect(throws: RemoteError.notRunning) { try RemoteSocket.request(.undo, at: path) }
+
+        let listener = try RemoteSocket.listen(at: path)
+        defer {
+            close(listener)
+            unlink(path)
+        }
+        let server = Thread {
+            let client = accept(listener, nil, nil)
+            RemoteSocket.serve(client) { command in
+                command == .layouts ? .success("Halves") : .failure("unexpected \(command)")
+            }
+        }
+        server.start()
+        #expect(try RemoteSocket.request(.layouts, at: path) == .success("Halves"))
+    }
+}

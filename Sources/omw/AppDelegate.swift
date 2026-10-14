@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var manager = WindowManager(store: store)
     private lazy var overlay = OverlayController(store: store, manager: manager) { [weak self] in self?.openSettings(layoutID: $0) }
     private lazy var hud = HUDController { [weak self] in self?.manager.undo() }
+    private lazy var remote = RemoteController(store: store, manager: manager, overlay: overlay)
     private let settingsNavigation = SettingsNavigation()
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
@@ -59,6 +60,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if !AX.isTrusted { AX.requestTrust() }
         Updater.shared.start()
+        remote.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        remote.stop()
     }
 
     /// Opening omw again from Finder, Spotlight or a launcher shows Settings, the way back when the icon is hidden.

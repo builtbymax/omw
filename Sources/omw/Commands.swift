@@ -87,13 +87,18 @@ enum SpaceMover {
         let flags: CGEventFlags
     }
 
-    static func move(_ window: ManagedWindow, by delta: Int) {
-        guard hasSpace(beside: window, by: delta) != false,
-              let shortcut = missionControlShortcut(right: delta > 0) else {
+    /// Starts the move. Whether the Space really switched is only known later; then it just beeps.
+    static func move(_ window: ManagedWindow, by delta: Int) -> ActionError? {
+        guard hasSpace(beside: window, by: delta) != false else {
             NSSound.beep()
-            return
+            return .noSpace
+        }
+        guard let shortcut = missionControlShortcut(right: delta > 0) else {
+            NSSound.beep()
+            return .spaceShortcutOff(right: delta > 0)
         }
         afterKeysReleased(until: .now + 1) { drag(window, with: shortcut) }
+        return nil
     }
 
     /// Runs `action` once no key is held. The omw hotkey (⌃⌥⇧→) is usually still down when the

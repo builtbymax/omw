@@ -17,8 +17,10 @@ BIN_DIR="$(swift build -c release $ARCH_FLAGS --show-bin-path)"
 
 APP=build/omw.app
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks" "$APP/Contents/Helpers"
 cp "$BIN_DIR/omw" "$APP/Contents/MacOS/omw"
+# The command-line tool, which Settings links into /usr/local/bin.
+cp "$BIN_DIR/omw-cli" "$APP/Contents/Helpers/omw"
 ditto "$BIN_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 
 # Sparkle compares CFBundleVersion to find newer builds, so it must only ever go up: use the commit count.
@@ -36,7 +38,7 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
-# Sign inside-out (never --deep): Sparkle's helpers first, then the framework, then the app.
+# Sign inside-out (never --deep): Sparkle's helpers first, then the framework and the CLI, then the app.
 IDENTITY="${OMW_SIGN_IDENTITY:--}"
 SIGN=(codesign --force --sign "$IDENTITY")
 [[ "$IDENTITY" == "Developer ID Application"* ]] && SIGN+=(--options runtime --timestamp)
@@ -46,5 +48,6 @@ $SIGN --preserve-metadata=entitlements "$SPARKLE/XPCServices/Downloader.xpc"
 $SIGN "$SPARKLE/Autoupdate"
 $SIGN "$SPARKLE/Updater.app"
 $SIGN "$APP/Contents/Frameworks/Sparkle.framework"
+$SIGN --identifier com.builtbymax.omw.cli "$APP/Contents/Helpers/omw"
 $SIGN "$APP"
 echo "Built $APP $(plutil -extract CFBundleShortVersionString raw "$PLIST") ($(plutil -extract CFBundleVersion raw "$PLIST")), signed with ${IDENTITY/#-/ad-hoc}"

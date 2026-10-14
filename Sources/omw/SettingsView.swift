@@ -33,7 +33,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var keywords: String {
         switch self {
         case .appearance: "accent color theme system blue"
-        case .general: "launch login startup accessibility permission gap spacing animate animation confirmation hud config file finder"
+        case .general: "launch login startup accessibility permission gap spacing animate animation confirmation hud config file finder cli terminal command line"
         case .layouts: "columns ratio preferred pin apps"
         case .shortcuts: "hotkey keyboard open move window left right"
         case .about: "version info"
@@ -324,6 +324,8 @@ private struct GeneralSettings: View {
     @State private var trusted = AX.isTrusted
     @State private var reloaded = false
     @State private var reloadError: String?
+    @State private var cliStatus = CLIInstaller.status
+    @State private var cliError: String?
 
     var body: some View {
         ScrollPage {
@@ -375,6 +377,22 @@ private struct GeneralSettings: View {
                 }
             }
 
+            if cliStatus != .unavailable {
+                SettingsSection(title: "Command line") {
+                    SettingsRow(.terminal, "omw CLI", subtitle: cliSubtitle, monoSubtitle: cliStatus == .installed, divider: false) {
+                        switch cliStatus {
+                        case .installed:
+                            Button("Uninstall") { changeCLI(CLIInstaller.uninstall) }.buttonStyle(.glassCapsule(.secondary))
+                        case .notInstalled, .otherCopy:
+                            Button(cliStatus == .otherCopy ? "Reinstall" : "Install") { changeCLI(CLIInstaller.install) }
+                                .buttonStyle(.glassCapsule(.primary))
+                        case .taken, .unavailable:
+                            EmptyView()
+                        }
+                    }
+                }
+            }
+
             SettingsSection(title: "Configuration") {
                 SettingsRow(.config, "Config file", subtitle: store.url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
                             monoSubtitle: true, divider: false) {
@@ -397,13 +415,38 @@ private struct GeneralSettings: View {
         } message: {
             Text("\(reloadError ?? "")\n\nYour current settings are unchanged.")
         }
+        .alert("Could not change the omw CLI", isPresented: Binding(get: { cliError != nil }, set: { if !$0 { cliError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(cliError ?? "")
+        }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
             trusted = AX.isTrusted
+            cliStatus = CLIInstaller.status
         }
     }
 }
 
 private extension GeneralSettings {
+    var cliSubtitle: String {
+        switch cliStatus {
+        case .installed: "Installed at \(CLIInstaller.linkPath)"
+        case .otherCopy: "\(CLIInstaller.linkPath) points to another copy of omw."
+        case .taken: "\(CLIInstaller.linkPath) belongs to another program."
+        case .notInstalled, .unavailable: "Apply layouts and move windows from the terminal: omw apply code"
+        }
+    }
+
+    func changeCLI(_ change: () throws -> Void) {
+        do {
+            try change()
+        } catch is CancellationError {
+        } catch {
+            cliError = error.localizedDescription
+        }
+        cliStatus = CLIInstaller.status
+    }
+
     var menuBarSubtitle: String {
         if store.config.showMenuBarIcon { return "Quick access to layouts and settings." }
         let launcher = store.config.overlayShortcut.map { "the launcher (\($0.displayString) → ⌘,)" } ?? "the launcher"
