@@ -484,6 +484,7 @@ struct OverlayView: View {
                             .padding(.horizontal, 12)
                             .padding(.top, 10)
                             .padding(.bottom, 4)
+                            .id(sectionID(section.title))
                         ForEach(section.indices, id: \.self) { index in
                             let item = model.results[index]
                             Button {
@@ -511,10 +512,21 @@ struct OverlayView: View {
                 .padding(.bottom, 10)
             }
             .onChange(of: model.selection) { _, selection in
-                withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(selection) }
+                // The first row of a section brings its label into view too.
+                let section = sections.first { $0.indices.first == selection }
+                withAnimation(.easeOut(duration: 0.12)) {
+                    if let section { proxy.scrollTo(sectionID(section.title), anchor: .top) }
+                    else { proxy.scrollTo(selection) }
+                }
+            }
+            .onChange(of: model.focusToken) {
+                // The panel is reused, so start every opening at the top.
+                if let first = sections.first { proxy.scrollTo(sectionID(first.title), anchor: .top) }
             }
         }
     }
+
+    private func sectionID(_ title: String) -> String { "section-\(title)" }
 
     /// Results grouped by section, keeping their flat index for selection.
     private var sections: [(title: String, indices: [Int])] {
