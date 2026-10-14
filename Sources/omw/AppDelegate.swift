@@ -117,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             })
         }
         menu.addItem(move)
+        menu.addItem(ClosureMenuItem("Refresh Layout", symbol: "arrow.triangle.2.circlepath") { [weak self] in self?.manager.refresh() })
         if manager.canUndo {
             menu.addItem(ClosureMenuItem("Undo Last Arrange", symbol: "arrow.uturn.backward") { [weak self] in self?.manager.undo() })
         }

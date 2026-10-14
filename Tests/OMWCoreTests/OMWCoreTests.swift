@@ -53,6 +53,19 @@ private func window(_ app: String, at x: Double = 50) -> WindowSnapshot {
         #expect(first == second)
     }
 
+    @Test func newWindowsFillTheEmptiestCells() {
+        let existing = [window("a", at: 10), window("b", at: 50), window("c", at: 50)]
+        let result = Arranger.assignNew([window("d"), window("e"), window("f")], existing: existing, layout: focus, in: screen)
+        #expect(result == [2, 0, 2])
+    }
+
+    @Test func newPinnedWindowsGoToTheirCell() {
+        var layout = focus
+        layout.pins = ["vscode": 1]
+        let result = Arranger.assignNew([window("vscode", at: 90)], existing: [window("a", at: 50)], layout: layout, in: screen)
+        #expect(result == [1])
+    }
+
     @Test func moveSwapsWithTheFrontmostWindowInTheTargetColumn() {
         // index 0 is focused in column 1; column 0 has windows 1 (front) and 3.
         let assignment = [1, 0, 2, 0]

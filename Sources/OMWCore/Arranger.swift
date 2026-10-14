@@ -106,6 +106,22 @@ public enum Arranger {
         return result.map { $0 ?? 0 }
     }
 
+    /// Cells for windows that showed up after a layout was applied. `existing` windows stay where they are
+    /// and only count towards how full their cell is. New windows go to their pinned cell, otherwise to the
+    /// cell with the fewest windows, layering into the same cells once every cell is taken.
+    public static func assignNew(_ windows: [WindowSnapshot], existing: [WindowSnapshot], layout: Layout, in area: CGRect) -> [Int] {
+        var counts = [Int](repeating: 0, count: layout.cellCount)
+        for window in existing {
+            counts[cellIndex(at: CGPoint(x: window.frame.midX, y: window.frame.midY), layout: layout, in: area)] += 1
+        }
+        return windows.map { window in
+            let pinned = window.appID.flatMap { layout.pins[$0] }.flatMap { counts.indices.contains($0) ? $0 : nil }
+            let cell = pinned ?? counts.indices.min { counts[$0] < counts[$1] } ?? 0
+            counts[cell] += 1
+            return cell
+        }
+    }
+
     /// Where a window goes when it's moved up (-1) or down (+1) inside `column`: into the top or
     /// bottom half, or back to the full column if it already sits in the opposite half.
     public static func verticalSlot(for frame: CGRect, in column: CGRect, direction: Int, gap: Double) -> CGRect {

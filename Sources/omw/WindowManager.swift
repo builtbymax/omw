@@ -6,8 +6,11 @@ final class WindowManager {
     private let store: ConfigStore
     /// The layout last applied on each display, used to know the columns when moving windows.
     private var activeLayouts: [CGDirectDisplayID: UUID] = [:]
+    /// Windows the active layout placed on each display. Anything else is new to "Refresh Layout".
+    private var arrangedWindows: [CGDirectDisplayID: Set<CGWindowID>] = [:]
     /// Frames from before the last arrange, so it can be undone.
-    private var undoState: (moves: [(window: ManagedWindow, frame: CGRect)], displayID: CGDirectDisplayID, layoutID: UUID?)?
+    private var undoState: (moves: [(window: ManagedWindow, frame: CGRect)], displayID: CGDirectDisplayID, layoutID: UUID?,
+                            arranged: Set<CGWindowID>?)?
     private let animator = FrameAnimator()
 
     /// Called after a layout was applied with the number of windows that were arranged.
@@ -28,11 +31,42 @@ final class WindowManager {
         let windows = AX.visibleWindows(on: screen).filter { layout.arranges(appID: $0.bundleID) }
         let area = screen.axVisibleFrame
         let assignment = Arranger.assign(snapshots(windows), layout: layout, in: area, pinned: true, balanced: true)
-        undoState = (windows.map { ($0, $0.frame) }, screen.displayID, activeLayouts[screen.displayID])
+        undoState = (windows.map { ($0, $0.frame) }, screen.displayID, activeLayouts[screen.displayID], arrangedWindows[screen.displayID])
         place(windows, assignment, layout: layout, area: area)
         activeLayouts[screen.displayID] = layout.id
+        arrangedWindows[screen.displayID] = Set(windows.map(\.windowID))
         store.config.lastLayoutID = layout.id
         onArranged?(layout, windows.count, screen)
+    }
+
+    /// Places windows opened since the active layout was applied, without touching the ones already in it.
+    /// Windows that already fill a cell count as placed too, so this also works after omw restarted.
+    func refresh(on target: NSScreen? = nil) {
+        guard ensureTrusted(), let screen = target ?? AX.targetScreen() else { return }
+        let layout = layout(for: screen)
+        let area = screen.axVisibleFrame
+        let cells = Arranger.cells(for: layout, in: area, gap: store.config.gap)
+        let windows = AX.visibleWindows(on: screen).filter { layout.arranges(appID: $0.bundleID) }
+        let arranged = (arrangedWindows[screen.displayID] ?? [])
+            .union(windows.filter { window in cells.contains { Self.matches(window.frame, $0) } }.map(\.windowID))
+        let new = windows.filter { !arranged.contains($0.windowID) }
+        guard !new.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        let existing = windows.filter { arranged.contains($0.windowID) }
+        let assignment = Arranger.assignNew(snapshots(new), existing: snapshots(existing), layout: layout, in: area)
+        undoState = (new.map { ($0, $0.frame) }, screen.displayID, activeLayouts[screen.displayID], arrangedWindows[screen.displayID])
+        place(new, assignment, layout: layout, area: area)
+        activeLayouts[screen.displayID] = layout.id
+        arrangedWindows[screen.displayID] = arranged.union(new.map(\.windowID))
+        onArranged?(layout, new.count, screen)
+    }
+
+    /// Apps round frames to their own size steps (e.g. terminals), so allow some slack.
+    private static func matches(_ frame: CGRect, _ cell: CGRect) -> Bool {
+        abs(frame.minX - cell.minX) < 4 && abs(frame.minY - cell.minY) < 4
+            && abs(frame.width - cell.width) < 24 && abs(frame.height - cell.height) < 24
     }
 
     /// Puts the windows of the last arrange back where they were.
@@ -46,6 +80,7 @@ final class WindowManager {
         }
         animator.run(moves, animated: store.config.animate)
         activeLayouts[state.displayID] = state.layoutID
+        arrangedWindows[state.displayID] = state.arranged
     }
 
     /// Moves the focused window one cell left/right (dx) or up/down (dy), swapping it with the window that's there.
@@ -66,6 +101,7 @@ final class WindowManager {
         }
         place(windows, next, layout: layout, area: area)
         activeLayouts[screen.displayID] = layout.id
+        arrangedWindows[screen.displayID] = Set(windows.map(\.windowID))
     }
 
     func perform(_ command: WindowCommand) {

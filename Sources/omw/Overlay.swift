@@ -386,6 +386,9 @@ final class OverlayController: NSObject, NSWindowDelegate {
                         section: .commands, icon: .tile(command.style), detail: command.detail,
                         actionTitle: "Move Window") { [weak self] in self?.manager.perform(command) }
         }
+        commands.append(OverlayItem(id: "refresh", title: "Refresh Layout", section: .commands, icon: .tile(.refresh),
+                                    detail: "Places windows opened since the layout was applied. Windows already in the layout stay put.",
+                                    actionTitle: "Refresh") { [weak self] in self?.manager.refresh(on: self?.screen) })
         if manager.canUndo {
             commands.append(OverlayItem(id: "undo", title: "Undo Last Arrange", section: .commands, icon: .tile(.undo),
                                         detail: "Puts the windows back where they were before the last layout was applied.",
