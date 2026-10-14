@@ -16,6 +16,9 @@ current desktop snaps into it. No tiling trees, no workspaces, no config languag
 
 All shortcuts can be changed in **Settings** (menu bar icon → Settings…), and every layout can get its own shortcut.
 
+In Settings → Appearance, buttons, badges and highlights can follow the macOS accent color instead of omw blue.
+Layout icons and the blueprint stay omw blue.
+
 ### Launcher
 
 - While you browse, dashed ghost columns show the selected layout on the real display, and the

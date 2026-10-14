@@ -6,13 +6,23 @@ import SwiftUI
 typealias Layout = OMWCore.Layout
 
 /// Design tokens and building blocks for the glass look (see the "OMW" Figma file).
+@MainActor
 enum Theme {
-    static let accentTop = Color(hex: 0x5AA5FF)
-    static let accentBottom = Color(hex: 0x1F5FE0)
-    static let tileTop = Color(hex: 0x4C9BFF)
-    static let tileBottom = Color(hex: 0x1A56DB)
-    static let accentText = Color(hex: 0x9CC6FF)
+    /// omw blue, for the layout blueprint and icons, which keep it whatever the accent setting says.
+    static let brandTileTop = Color(hex: 0x4C9BFF)
+    static let brandTileBottom = Color(hex: 0x1A56DB)
+    static let brandText = Color(hex: 0x9CC6FF)
     static let green = Color(hex: 0x30D158)
+
+    // Reading these from a view body makes it redraw when the accent changes.
+    static var accentTop: Color { AccentPalette.shared.top }
+    static var accentBottom: Color { AccentPalette.shared.bottom }
+    static var tileTop: Color { AccentPalette.shared.tileTop }
+    static var tileBottom: Color { AccentPalette.shared.tileBottom }
+    /// Accent-tinted text and outlines, lighter in dark mode and darker in light mode.
+    static var accentText: Color { AccentPalette.shared.text }
+    /// Text and icons on an accent fill.
+    static var onAccent: Color { AccentPalette.shared.onAccent }
 
     static var accent: LinearGradient {
         LinearGradient(colors: [accentTop, accentBottom], startPoint: .top, endPoint: .bottom)
@@ -97,7 +107,7 @@ struct LayoutIcon: View {
         let pad = 9 * s, gap = 4 * s
         let tile = RoundedRectangle(cornerRadius: 16 * s, style: .continuous)
         ZStack {
-            tile.fill(LinearGradient(colors: [Theme.tileTop, Theme.tileBottom], startPoint: .top, endPoint: .bottom))
+            tile.fill(LinearGradient(colors: [Theme.brandTileTop, Theme.brandTileBottom], startPoint: .top, endPoint: .bottom))
             tile.fill(RadialGradient(colors: [Color(hex: 0xBFE0FF, opacity: 0.45), .clear], center: .init(x: 0.5, y: 0.35),
                                      startRadius: 0, endRadius: size * 0.6))
             if size >= 24 { BlueprintGrid(divisions: 4).stroke(.white.opacity(0.1), lineWidth: 0.5) }
@@ -147,7 +157,7 @@ struct BlueprintGrid: Shape {
 /// Colored glass tile with a white SF Symbol, like System Settings.
 struct IconTile: View {
     enum Style {
-        case general, layouts, shortcuts, windows, login, accessibility, config, move, moveVertical, display, spaces, about, search, quit, undo, refresh, update, menuBar
+        case general, layouts, shortcuts, windows, login, accessibility, config, move, moveVertical, display, spaces, about, search, quit, undo, refresh, update, menuBar, appearance
 
         var symbol: String {
             switch self {
@@ -169,6 +179,7 @@ struct IconTile: View {
             case .refresh: "arrow.triangle.2.circlepath"
             case .update: "arrow.down.circle.fill"
             case .menuBar: "menubar.rectangle"
+            case .appearance: "paintpalette.fill"
             }
         }
 
@@ -190,6 +201,7 @@ struct IconTile: View {
             case .refresh: (0x3DD6C6, 0x0E9488)
             case .update: (0x4C9BFF, 0x1A56DB)
             case .menuBar: (0x8E9AAF, 0x5B6478)
+            case .appearance: (0xFF8FB8, 0xC026D3)
             }
         }
     }
@@ -334,7 +346,7 @@ struct GlassButtonStyle: ButtonStyle {
 
         private var foreground: Color {
             switch kind {
-            case .primary: .white
+            case .primary: Theme.onAccent
             case .secondary: .primary
             case .ghost: .primary.opacity(hovered && isEnabled ? 0.9 : 0.7)
             case .destructive: Color(hex: 0xFF6B61)

@@ -3,7 +3,7 @@ import OMWCore
 import SwiftUI
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, layouts, shortcuts, about
+    case general, appearance, layouts, shortcuts, about
 
     var id: String { rawValue }
 
@@ -12,6 +12,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var style: IconTile.Style {
         switch self {
         case .general: .general
+        case .appearance: .appearance
         case .layouts: .layouts
         case .shortcuts: .shortcuts
         case .about: .about
@@ -21,6 +22,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .general: "Startup, permissions, spacing and the config file."
+        case .appearance: "Colors of buttons, badges and highlights."
         case .layouts: "Columns, shortcuts and preferred columns per layout."
         case .shortcuts: "Global shortcuts and one per layout."
         case .about: "oh my windows"
@@ -30,6 +32,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     /// Extra words the sidebar search matches.
     var keywords: String {
         switch self {
+        case .appearance: "accent color theme system blue"
         case .general: "launch login startup accessibility permission gap spacing animate animation confirmation hud config file finder"
         case .layouts: "columns ratio preferred pin apps"
         case .shortcuts: "hotkey keyboard open move window left right"
@@ -61,6 +64,7 @@ struct SettingsView: View {
             Group {
                 switch navigation.page {
                 case .general: GeneralSettings(store: store)
+                case .appearance: AppearanceSettings(store: store)
                 case .layouts: LayoutSettings(store: store, selection: $navigation.layoutID)
                 case .shortcuts: ShortcutSettings(store: store)
                 case .about: AboutSettings(store: store)
@@ -416,6 +420,84 @@ private struct GapPicker: View {
     }
 }
 
+// MARK: - Appearance
+
+private struct AppearanceSettings: View {
+    @ObservedObject var store: ConfigStore
+
+    var body: some View {
+        ScrollPage {
+            PageHeader(page: .appearance)
+
+            SettingsSection(title: "Colors", footer: "Layout icons and the blueprint always stay omw blue.") {
+                SettingsRow(.appearance, "Accent color", subtitle: subtitle, divider: false) {
+                    AccentPicker(accent: $store.config.accent)
+                }
+            }
+        }
+    }
+
+    private var subtitle: String {
+        switch store.config.accent {
+        case .omw: "Buttons, badges and focus rings."
+        case .system where AccentPalette.shared.systemColor == nil: "macOS uses Multicolor, so omw keeps its blue."
+        case .system: "Follows System Settings → Appearance."
+        }
+    }
+}
+
+/// Color swatches with a label underneath, like the accent picker in System Settings.
+private struct AccentPicker: View {
+    @Binding var accent: Accent
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(Accent.allCases, id: \.self) { option in
+                let selected = option == accent
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { accent = option }
+                } label: {
+                    VStack(spacing: 5) {
+                        swatch(option)
+                            .frame(width: 22, height: 22)
+                            .overlay(Circle().strokeBorder(Theme.rim(0.5, 0.1), lineWidth: 1))
+                            .padding(3)
+                            .overlay(Circle().strokeBorder(.primary.opacity(selected ? 0.55 : 0), lineWidth: 2))
+                        Text(option.title)
+                            .font(.system(size: 10, weight: selected ? .semibold : .medium))
+                            .foregroundStyle(selected ? .primary : .secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.hoverable)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func swatch(_ option: Accent) -> some View {
+        switch option {
+        case .omw:
+            Circle().fill(LinearGradient(colors: [Color(hex: 0x5AA5FF), Color(hex: 0x1F5FE0)], startPoint: .top, endPoint: .bottom))
+        case .system:
+            if let color = AccentPalette.shared.systemColor {
+                Circle().fill(color)
+            } else {
+                Circle().fill(AngularGradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .pink, .red], center: .center))
+            }
+        }
+    }
+}
+
+private extension Accent {
+    var title: String {
+        switch self {
+        case .omw: "omw Blue"
+        case .system: "System"
+        }
+    }
+}
+
 // MARK: - Shortcuts
 
 private struct ShortcutSettings: View {
@@ -552,14 +634,14 @@ private struct LayoutListRow: View {
             LayoutIcon(layout: layout, size: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text(layout.name).font(.system(size: 13, weight: selected ? .semibold : .medium))
-                    .foregroundStyle(selected ? Color.white : .primary)
+                    .foregroundStyle(selected ? Theme.onAccent : .primary)
                 Text(layout.ratioLabel).font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(selected ? Color.white.opacity(0.7) : .secondary)
+                    .foregroundStyle(selected ? Theme.onAccent.opacity(0.7) : .secondary)
             }
             Spacer()
             if let shortcut = layout.shortcut {
                 Text(shortcut.displayString).font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(selected ? Color.white.opacity(0.7) : .secondary)
+                    .foregroundStyle(selected ? Theme.onAccent.opacity(0.7) : .secondary)
             }
         }
         .padding(.horizontal, 8)
@@ -1075,7 +1157,7 @@ private struct BlueprintEditor: View {
         return Capsule()
             .fill(.white)
             .frame(width: active ? 8 : 6, height: active ? 46 : 38)
-            .shadow(color: Theme.accentText.opacity(0.9), radius: active ? 10 : 6)
+            .shadow(color: Theme.brandText.opacity(0.9), radius: active ? 10 : 6)
             .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
             .frame(width: 20, height: 48)
             .contentShape(Rectangle())
@@ -1148,7 +1230,7 @@ struct ShortcutRecorder: View {
             if recording {
                 Text("Type shortcut…")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.onAccent)
                     .padding(.horizontal, 11)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(Theme.accent))

@@ -1,5 +1,10 @@
 import Foundation
 
+/// Color of buttons, badges and focus rings. The layout blueprint and icons always stay omw blue.
+public enum Accent: String, Codable, CaseIterable, Sendable {
+    case omw, system
+}
+
 public struct Config: Codable, Equatable {
     public var layouts: [Layout]
     /// Space in points around and between windows.
@@ -23,6 +28,7 @@ public struct Config: Codable, Equatable {
     public var showMenuBarIcon: Bool
     /// Open the launcher panel on the primary display. Layouts still go to the focused window's display.
     public var launcherOnPrimaryDisplay: Bool
+    public var accent: Accent
     public var lastLayoutID: UUID?
 
     public init(
@@ -42,6 +48,7 @@ public struct Config: Codable, Equatable {
         showHUD: Bool = true,
         showMenuBarIcon: Bool = true,
         launcherOnPrimaryDisplay: Bool = false,
+        accent: Accent = .omw,
         lastLayoutID: UUID? = nil
     ) {
         self.layouts = layouts
@@ -60,13 +67,14 @@ public struct Config: Codable, Equatable {
         self.showHUD = showHUD
         self.showMenuBarIcon = showMenuBarIcon
         self.launcherOnPrimaryDisplay = launcherOnPrimaryDisplay
+        self.accent = accent
         self.lastLayoutID = lastLayoutID
     }
 
     private enum CodingKeys: String, CodingKey {
         case layouts, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
         case moveToNextDisplayShortcut, moveToPreviousDisplayShortcut, moveToNextSpaceShortcut, moveToPreviousSpaceShortcut
-        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, lastLayoutID
+        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, accent, lastLayoutID
     }
 
     /// Missing keys fall back to defaults, an explicit `null` shortcut stays disabled.
@@ -92,6 +100,8 @@ public struct Config: Codable, Equatable {
         showHUD = try c.decodeIfPresent(Bool.self, forKey: .showHUD) ?? d.showHUD
         showMenuBarIcon = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? d.showMenuBarIcon
         launcherOnPrimaryDisplay = try c.decodeIfPresent(Bool.self, forKey: .launcherOnPrimaryDisplay) ?? d.launcherOnPrimaryDisplay
+        // An unknown value from a newer omw falls back instead of failing the whole config.
+        accent = (try? c.decodeIfPresent(Accent.self, forKey: .accent)) ?? d.accent
         lastLayoutID = try c.decodeIfPresent(UUID.self, forKey: .lastLayoutID)
     }
 
@@ -113,6 +123,7 @@ public struct Config: Codable, Equatable {
         try c.encode(showHUD, forKey: .showHUD)
         try c.encode(showMenuBarIcon, forKey: .showMenuBarIcon)
         try c.encode(launcherOnPrimaryDisplay, forKey: .launcherOnPrimaryDisplay)
+        try c.encode(accent, forKey: .accent)
         try c.encodeIfPresent(lastLayoutID, forKey: .lastLayoutID)
     }
 }

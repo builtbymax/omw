@@ -267,13 +267,18 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         var config = Config()
         config.moveLeftShortcut = nil
         config.launcherOnPrimaryDisplay = true
+        config.accent = .system
         let decoded = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(config))
         #expect(decoded.moveLeftShortcut == nil)
         #expect(decoded.launcherOnPrimaryDisplay)
+        #expect(decoded.accent == .system)
         #expect(decoded.moveRightShortcut == config.moveRightShortcut)
 
         let minimal = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
         #expect(minimal == Config())
+
+        let unknownAccent = try JSONDecoder().decode(Config.self, from: Data(#"{"accent": "rainbow"}"#.utf8))
+        #expect(unknownAccent.accent == .omw)
     }
 }
 

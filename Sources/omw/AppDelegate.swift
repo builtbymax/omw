@@ -37,6 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             .store(in: &subscriptions)
 
+        store.$config
+            .map(\.accent)
+            .removeDuplicates()
+            .sink { AccentPalette.shared.mode = $0 }
+            .store(in: &subscriptions)
+
         HotkeyCenter.shared.reload = { [weak self] in
             guard let self else { return }
             self.registerHotkeys(self.store.config)
