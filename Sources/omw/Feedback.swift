@@ -99,14 +99,16 @@ private final class HUDModel: ObservableObject {
 /// "Arranged 5 windows" confirmation at the bottom of the display, with Undo.
 @MainActor
 final class HUDController {
-    private static let size = NSSize(width: 460, height: 90)
+    /// Room around the pill for its shadow (radius 20, y 10), so the panel edge never clips it.
+    private static let size = NSSize(width: 540, height: 130)
+    private static let shadowInset: CGFloat = 34
     private let panel = FeedbackPanel(clickThrough: false)
     private let model = HUDModel()
     private var hideTask: Task<Void, Never>?
 
     init(undo: @escaping () -> Void) {
         panel.setContentSize(Self.size)
-        panel.contentView = NSHostingView(rootView: HUDView(model: model))
+        panel.contentView = NSHostingView(rootView: HUDView(model: model, bottomInset: Self.shadowInset))
         model.onUndo = { [weak self] in
             undo()
             self?.hide()
@@ -115,7 +117,7 @@ final class HUDController {
 
     func show(_ layout: Layout, count: Int, on screen: NSScreen) {
         let visible = screen.visibleFrame
-        panel.setFrameOrigin(NSPoint(x: visible.midX - Self.size.width / 2, y: visible.minY + 28))
+        panel.setFrameOrigin(NSPoint(x: visible.midX - Self.size.width / 2, y: visible.minY + 40 - Self.shadowInset))
         model.layout = layout
         model.count = count
         model.visible = false
@@ -142,6 +144,7 @@ final class HUDController {
 
 private struct HUDView: View {
     @ObservedObject var model: HUDModel
+    let bottomInset: CGFloat
     @State private var bounce = false
 
     var body: some View {
@@ -166,6 +169,8 @@ private struct HUDView: View {
                 }
                 .padding(10)
                 .padding(.trailing, 4)
+                // A dark base under the content keeps the white text readable when light windows shine through the glass.
+                .background(RoundedRectangle(cornerRadius: 30, style: .continuous).fill(Color(hex: 0x141824, opacity: 0.6)))
                 .glassSurface(cornerRadius: 30, tint: Color(hex: 0x141824, opacity: 0.55))
                 .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
                 .transition(.move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.9)))
@@ -176,7 +181,7 @@ private struct HUDView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.bottom, 12)
+        .padding(.bottom, bottomInset)
         .environment(\.colorScheme, .dark)
     }
 }
