@@ -178,8 +178,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.center()
             settingsWindow = window
         }
-        NSApp.activate()
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        guard let window = settingsWindow else { return }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        // The launcher panel and the status menu don't activate omw, and the cooperative NSApp.activate()
+        // is often refused then, leaving Settings behind the frontmost app. Force it.
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     /// Menu-bar apps have no visible main menu, but text fields still need the Edit shortcuts.
