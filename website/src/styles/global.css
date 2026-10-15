@@ -1,0 +1,34 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/* Tokens from the Paper file "OMW" */
+@theme {
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  --color-paper: #ffffff;
+  --color-ink: #0e1116;
+  --color-graphite: #5b6270;
+  --color-rule: #e4e7ec;
+  --color-cobalt: #1a56db;
+  --color-sky: #4c9bff;
+
+  --radius-sm: 8px;
+  --radius-lg: 14px;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-black font-sans text-paper antialiased;
+  }
+}
+
+@utility label {
+  @apply font-mono text-[12px] leading-4 tracking-[0.12em] uppercase;
+}

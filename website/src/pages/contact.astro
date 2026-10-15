@@ -1,0 +1,37 @@
+---
+import Page from '../layouts/Page.astro';
+import { contactEmail, legal } from '../config';
+---
+
+<Page
+  title="Contact — omw"
+  description="Questions, bug reports or layout ideas: how to reach omw."
+  label="Contact"
+  heading="Say hello."
+  sheet="Sheet 03 / Contact"
+>
+  <section>
+    <h2>Email</h2>
+    <p>Questions, bug reports, layout ideas: email is the best way to reach me.</p>
+    <p class="email"><a href={`mailto:${contactEmail}`}>{contactEmail}</a></p>
+  </section>
+
+  <section>
+    <h2>Legal notice</h2>
+    <address>
+      {legal.name}<br />
+      {legal.street}<br />
+      {legal.city}<br />
+      {legal.country}<br />
+      <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
+    </address>
+  </section>
+</Page>
+
+<style>
+  .email a {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    line-height: 28px;
+  }
+</style>

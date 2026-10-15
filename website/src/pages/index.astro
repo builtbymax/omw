@@ -1,0 +1,192 @@
+---
+import { Image } from 'astro:assets';
+import Layout from '../layouts/Layout.astro';
+import DownloadButton from '../components/DownloadButton.astro';
+import launcher from '../assets/launcher.png';
+import { brewCommand, minimumMacOS, version } from '../config';
+
+const spec: { mark?: string; keys?: string[]; title: string; body: string }[] = [
+  { keys: ['⌃', '⌥', 'Space'], title: 'One shortcut.', body: 'Open the launcher, type code or 20/60, press Return. Done.' },
+  {
+    mark: '20/60/20',
+    title: 'Layouts that read like numbers.',
+    body: '50/50, 20/60/20 or 1:2:1. Or drag the column edges in the blueprint, they snap to 5%.',
+  },
+  {
+    mark: '2x20/60/_20',
+    title: 'Rows and empty columns.',
+    body: '2x20 stacks two windows in a column. _20 keeps a column free.',
+  },
+  {
+    mark: 'pin → 60',
+    title: 'Pinned apps.',
+    body: 'Your editor always lands in the middle. Everything else fills in around it.',
+  },
+  {
+    keys: ['⌃', '⌥', '⌘', '←', '→'],
+    title: 'Keyboard moves.',
+    body: 'Send the focused window to the next column, row, display or Space.',
+  },
+  { mark: '↺', title: 'Undo.', body: 'Every arrangement can be taken back with one click.' },
+  { mark: '$ omw apply code', title: 'Scriptable.', body: 'Drive omw from scripts, Shortcuts, Raycast or Alfred.' },
+  {
+    mark: '1 icon',
+    title: 'Small on purpose.',
+    body: 'No tiling trees, no config language. It arranges windows when you ask and stays out of the way otherwise.',
+  },
+];
+---
+
+<Layout
+  title="omw — pick a layout, every window snaps into it"
+  description="omw is a small column window manager for macOS. Press a shortcut, type 20/60/20, and your windows line up side by side."
+>
+  <main>
+    <section class="mx-auto flex max-w-252 flex-col items-center gap-7 px-6 pt-16 pb-14 text-center md:pt-26 md:pb-18">
+      <p class="flex items-center gap-2.5 rounded-[6px] border border-dashed border-white/55 px-3 py-1.5 font-mono text-[13px] leading-4 tracking-[0.08em]">
+        <span>⌃⌥SPACE</span>
+        <span class="tracking-normal text-white/60">→</span>
+        <span>50/50</span>
+      </p>
+      <h1 class="text-[44px] leading-[1.05] font-semibold tracking-[-0.045em] text-balance sm:text-[64px] md:text-[80px] md:leading-20">
+        Pick a layout.<br /> Every window snaps into it.
+      </h1>
+      <p class="max-w-140 text-[17px] leading-7 text-white/60 md:text-[19px] md:leading-7.25">
+        omw is a small column window manager for macOS. Press a shortcut, type 20/60/20, and your windows line up side by
+        side.
+      </p>
+      <div class="flex flex-col items-center gap-3.5 pt-2">
+        <DownloadButton class="py-4" />
+        <p class="label tracking-[0.08em] text-white/60">V{version} · macOS {minimumMacOS}+ · Free</p>
+      </div>
+    </section>
+
+    <figure class="mx-auto flex max-w-306 flex-col items-center gap-5 px-6 pb-24 md:pb-36 xl:px-0">
+      <div class="flex w-full items-end gap-4">
+        <div class="hidden h-175 w-9 shrink-0 flex-col items-center gap-2 font-mono text-[12px] leading-4 xl:flex" aria-hidden="true">
+          <span class="h-px w-3 bg-paper"></span>
+          <span class="w-px flex-1 bg-white/60"></span>
+          100%
+          <span class="w-px flex-1 bg-white/60"></span>
+          <span class="h-px w-3 bg-paper"></span>
+        </div>
+        <div class="flex min-w-0 flex-1 flex-col gap-3.5">
+          <div class="flex items-center font-mono text-[12px] leading-4" aria-hidden="true">
+            <div class="flex flex-1 items-center gap-2.5">
+              <span class="h-3 w-px bg-paper"></span>
+              <span class="h-px flex-1 bg-white/60"></span>
+              50%
+              <span class="h-px flex-1 bg-white/60"></span>
+            </div>
+            <div class="flex flex-1 items-center gap-2.5">
+              <span class="h-3 w-px bg-paper"></span>
+              <span class="h-px flex-1 bg-white/60"></span>
+              50%
+              <span class="h-px flex-1 bg-white/60"></span>
+              <span class="h-3 w-px bg-paper"></span>
+            </div>
+          </div>
+          <Image
+            src={launcher}
+            alt="The omw launcher with the Halves layout selected, ghost columns showing where windows land"
+            widths={[720, 1120, 1440]}
+            sizes="(min-width: 1224px) 1120px, 100vw"
+            loading="eager"
+            class="aspect-[1120/700] w-full rounded-lg shadow-[0_0_0_1px_#FFFFFF59,0_50px_100px_-40px_#1F1F1FE6]"
+          />
+        </div>
+        <div class="hidden w-9 shrink-0 xl:block"></div>
+      </div>
+      <figcaption class="label text-center text-white/60">
+        Fig. 1 — The launcher, Halves selected. Ghost columns show where windows land.
+      </figcaption>
+    </figure>
+
+    <section class="mx-auto flex max-w-296 flex-col gap-12 px-6 pb-24 md:pb-36 xl:px-0">
+      <div class="flex items-end justify-between">
+        <h2 class="text-[44px] leading-[1.04] font-semibold tracking-[-0.04em] md:text-[56px] md:leading-14.5">
+          Columns,<br /> not chaos.
+        </h2>
+        <p class="label hidden pb-2 text-white/60 sm:block">Specification</p>
+      </div>
+      <ol class="grid gap-x-8 md:grid-cols-2">
+        {spec.map(({ mark, keys, title, body }, index) => (
+          <li class="flex gap-5 border-t border-white/30 pt-7 pb-8">
+            <span class="w-7 shrink-0 font-mono text-[12px] leading-5.5 text-white/60">
+              {String(index + 1).padStart(2, '0')}
+            </span>
+            <div class="flex flex-col gap-2.5">
+              {keys ? (
+                <p class="flex gap-1.5">
+                  {keys.map((key) => (
+                    <kbd class="inline-flex h-7 min-w-7 items-center justify-center rounded-[6px] border border-b-2 border-white/30 bg-white/5 px-2 font-mono text-[15px] leading-none">
+                      {key}
+                    </kbd>
+                  ))}
+                </p>
+              ) : (
+                <p class="font-mono text-[22px] leading-7">{mark}</p>
+              )}
+              <h3 class="text-[18px] leading-6.5 font-semibold">{title}</h3>
+              <p class="text-[16px] leading-6 text-white/60">{body}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+
+    <section id="install" class="mx-auto flex max-w-172 flex-col gap-10 px-6 py-14 text-center">
+      <div class="flex flex-col items-center gap-5">
+        <p class="label">Install</p>
+        <h2 class="text-[40px] leading-[1.04] font-semibold tracking-[-0.04em] md:text-[48px] md:leading-12.5">
+          Free. No account,<br /> no tracking,<br /> just columns.
+        </h2>
+        <p class="text-[16px] leading-6">
+          Requires macOS {minimumMacOS} or later. On first launch, macOS asks for Accessibility access so omw can move your
+          windows.
+        </p>
+      </div>
+      <div class="flex min-w-0 flex-col gap-7 text-left">
+        <div class="flex flex-col items-start gap-3">
+          <p class="label">A — Download</p>
+          <DownloadButton class="py-3.75" />
+          <p class="text-[14px] leading-5 text-white/60">Unzip it and move omw to Applications. Universal app for Apple silicon and Intel.</p>
+        </div>
+        <hr class="border-white/30" />
+        <div class="flex flex-col gap-3">
+          <p class="label">B — Homebrew</p>
+          <div class="flex items-center justify-between gap-4 rounded-[10px] bg-[#F6F6F608] px-4.5 py-3.5">
+            <code class="overflow-x-auto font-mono text-[15px] leading-4.5 whitespace-nowrap">{brewCommand}</code>
+            <button
+              type="button"
+              data-copy={brewCommand}
+              class="shrink-0 cursor-pointer transition hover:opacity-70"
+              aria-label="Copy command"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="5" y="5" width="9" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+                <path
+                  d="M11 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linecap="round"></path>
+              </svg>
+            </button>
+          </div>
+          <p class="text-[14px] leading-5 text-white/60">Either way, omw keeps itself up to date.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</Layout>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+    button.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(button.dataset.copy ?? '');
+      button.style.opacity = '0.4';
+      setTimeout(() => (button.style.opacity = ''), 600);
+    });
+  }
+</script>

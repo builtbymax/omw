@@ -1,0 +1,73 @@
+---
+import Layout from './Layout.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  label: string;
+  heading: string;
+  sheet: string;
+}
+
+const { title, description, label, heading, sheet } = Astro.props;
+---
+
+<Layout title={title} description={description} sheet={sheet}>
+  <main class="mx-auto flex max-w-172 flex-col gap-5 px-6 pt-16 pb-12 md:pt-26">
+    <p class="label text-white/60">{label}</p>
+    <h1 class="text-[44px] leading-[1.04] font-semibold tracking-[-0.04em] md:text-[56px] md:leading-14.5">{heading}</h1>
+    <div class="prose mt-6 flex flex-col gap-10">
+      <slot />
+    </div>
+  </main>
+</Layout>
+
+<style>
+  .prose :global(section) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    border-top: 1px solid rgb(255 255 255 / 0.3);
+    padding-top: 1.75rem;
+  }
+
+  .prose :global(h2) {
+    font-size: 18px;
+    line-height: 26px;
+    font-weight: 600;
+  }
+
+  .prose :global(p),
+  .prose :global(li),
+  .prose :global(address) {
+    font-size: 16px;
+    line-height: 24px;
+    font-style: normal;
+    color: rgb(255 255 255 / 0.6);
+  }
+
+  .prose :global(ul) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-left: 1.25rem;
+    list-style: disc;
+  }
+
+  .prose :global(a) {
+    color: var(--color-paper);
+    text-decoration: underline;
+    text-decoration-color: rgb(255 255 255 / 0.35);
+    text-underline-offset: 3px;
+  }
+
+  .prose :global(a:hover) {
+    text-decoration-color: currentColor;
+  }
+
+  .prose :global(code) {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--color-paper);
+  }
+</style>

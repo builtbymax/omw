@@ -1,0 +1,59 @@
+---
+import Page from '../layouts/Page.astro';
+import { contactEmail } from '../config';
+---
+
+<Page
+  title="Privacy — omw"
+  description="omw doesn't collect personal data. What the app and this website do and don't do."
+  label="Privacy"
+  heading="Your windows stay yours."
+  sheet="Sheet 02 / Privacy"
+>
+  <section>
+    <h2>The short version</h2>
+    <p>omw doesn't collect, store or sell personal data. There's no account, no analytics and no tracking, in the app or on this website.</p>
+  </section>
+
+  <section>
+    <h2>The app</h2>
+    <p>
+      omw runs entirely on your Mac. Your layouts and settings are saved in <code>~/.config/omw/config.json</code> and never
+      leave your computer.
+    </p>
+    <p>
+      macOS asks you to grant omw Accessibility access. omw uses it only to find the windows on your screen and move them.
+      Nothing it sees is recorded or sent anywhere.
+    </p>
+  </section>
+
+  <section>
+    <h2>Updates</h2>
+    <p>
+      To check for updates, omw downloads a small update feed from GitHub, where releases are hosted. Like any web request,
+      this shares your IP address and the omw version with GitHub. No other information about your Mac is sent. You can
+      turn automatic checks off in Settings → General → Updates.
+    </p>
+    <p>
+      If you install omw with Homebrew, Homebrew's own <a href="https://docs.brew.sh/Analytics">analytics policy</a> applies.
+    </p>
+  </section>
+
+  <section>
+    <h2>This website</h2>
+    <p>
+      This site uses no cookies, no analytics and no third-party scripts. Fonts are served from this site. The server may
+      log standard request data such as IP address, time and browser, which is used only to run and secure the site.
+    </p>
+  </section>
+
+  <section>
+    <h2>Questions</h2>
+    <p>
+      If you write to <a href={`mailto:${contactEmail}`}>{contactEmail}</a>, your email is used only to reply. You can ask
+      what's stored about you or have it deleted at any time. The person responsible is listed on
+      the <a href="/contact">contact page</a>.
+    </p>
+    <p>Last updated October 16, 2026.</p>
+  </section>
+</Page>

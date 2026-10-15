@@ -1,0 +1,68 @@
+---
+import '../styles/global.css';
+import Logo from '../components/Logo.astro';
+import { domain, downloadUrl, footerLinks, version } from '../config';
+
+interface Props {
+  title: string;
+  description: string;
+  sheet?: string;
+}
+
+const { title, description, sheet = 'Sheet 01 / A column window manager' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <!-- The page slides off the wordmark below it, which stays pinned to the bottom of the viewport. -->
+    <div class="relative z-10 rounded-b-[28px] border-b border-white/15 bg-black">
+      <header class="mx-auto flex max-w-296 items-center justify-between px-6 py-7 xl:px-0">
+        <a href="/" class="flex items-center gap-2.5">
+          <Logo class="h-5 w-6.5" />
+          <span class="text-[17px] leading-5.5 font-semibold">omw</span>
+        </a>
+        <p class="label hidden tracking-[0.14em] text-white/60 md:block">{sheet}</p>
+        <a
+          href={downloadUrl}
+          class="rounded-full border border-white/50 px-4 py-2 text-[14px] leading-4.5 font-medium transition hover:border-white"
+        >
+          Download
+        </a>
+      </header>
+
+      <slot />
+
+      <footer class="mx-auto flex max-w-296 flex-col gap-6 px-6 pt-24 pb-10 sm:flex-row sm:items-center sm:justify-between xl:px-0">
+        <a href="/" class="flex items-center gap-2.5">
+          <Logo class="h-3.5 w-4.5" />
+          <span class="label tracking-[0.08em] text-white/60">omw {version} · © {new Date().getFullYear()} <span class="normal-case">{domain}</span></span>
+        </a>
+        <nav class="flex gap-7">
+          {footerLinks.map(({ label, href }) => (
+            <a href={href} class="label tracking-[0.08em] text-white/60 transition hover:text-paper">{label}</a>
+          ))}
+        </nav>
+      </footer>
+    </div>
+
+    <div class="sticky bottom-0 z-0 overflow-hidden px-[2vw] pt-[3vw] pb-[1vw]" aria-hidden="true">
+      <p class="text-center text-[11.75vw] leading-[0.8] font-black tracking-[-0.05em] whitespace-nowrap text-[#111111] select-none">
+        OH MY WINDOWS
+      </p>
+    </div>
+  </body>
+</html>
