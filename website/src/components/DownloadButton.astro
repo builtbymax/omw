@@ -10,24 +10,31 @@ const { class: className } = Astro.props;
 
 <a
   href={downloadUrl}
-  data-magnetic
+  data-glass
   class:list={[
-    'glass relative isolate inline-flex rounded-full px-6.5 text-[16px] leading-5 font-semibold text-black',
+    'glass relative isolate inline-flex items-center gap-2.5 rounded-full px-6.5 text-[16px] leading-5 font-semibold text-black',
     className,
   ]}
 >
-  <span data-magnetic-label class="label-shift flex items-center gap-2.5">
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d="M8 2v9m0 0L4.5 7.5M8 11l3.5-3.5M3 14h10"
-        fill="none"
-        stroke="#000000"
-        stroke-width="1.7"
-        stroke-linecap="round"
-        stroke-linejoin="round"></path>
-    </svg>
-    Download for macOS
-  </span>
+  <svg class="slide-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+    <path
+      d="M8 2v9m0 0L4.5 7.5M8 11l3.5-3.5M3 14h10"
+      fill="none"
+      stroke="#000000"
+      stroke-width="1.7"
+      stroke-linecap="round"
+      stroke-linejoin="round"></path>
+  </svg>
+  <span class="slide-label whitespace-nowrap">Download for macOS</span>
+  <svg class="slide-arrow" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+    <path
+      d="M2.5 8h11m-4.5-4.5L13.5 8 9 12.5"
+      fill="none"
+      stroke="#000000"
+      stroke-width="1.7"
+      stroke-linecap="round"
+      stroke-linejoin="round"></path>
+  </svg>
 </a>
 
 <style>
@@ -42,10 +49,7 @@ const { class: className } = Astro.props;
       inset 0 2px 1px -1px rgb(255 255 255),
       0 0 0 1px rgb(255 255 255 / 0.2),
       0 10px 28px -10px rgb(255 255 255 / 0.2);
-    transform: translate3d(var(--mx, 0px), var(--my, 0px), 0);
-    transition:
-      transform 0.5s cubic-bezier(0.2, 0.9, 0.25, 1),
-      box-shadow 0.3s ease;
+    transition: box-shadow 0.3s ease;
   }
 
   /* Soft highlight that follows the pointer. */
@@ -74,56 +78,57 @@ const { class: className } = Astro.props;
     opacity: 1;
   }
 
-  .label-shift {
-    transform: translate3d(var(--lx, 0px), var(--ly, 0px), 0);
-    transition: transform 0.5s cubic-bezier(0.2, 0.9, 0.25, 1);
+  /* Sliding blur, after atlasformac.com: the icon blurs out to the left, the label follows and an arrow blurs in on the right. */
+  .slide-icon,
+  .slide-label,
+  .slide-arrow {
+    transition:
+      transform 300ms cubic-bezier(0.4, 0, 0.2, 1),
+      opacity 300ms cubic-bezier(0.4, 0, 0.2, 1),
+      filter 300ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  .glass.is-pulled,
-  .glass.is-pulled .label-shift {
-    transition-duration: 0.15s;
+  .slide-arrow {
+    position: absolute;
+    right: 26px;
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateX(100%) scaleX(0.5);
+  }
+
+  .glass:is(:hover, :focus-visible) .slide-icon {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateX(-100%) scaleX(0.5);
+  }
+
+  /* Icon width plus the gap. */
+  .glass:is(:hover, :focus-visible) .slide-label {
+    transform: translateX(-26px);
+  }
+
+  .glass:is(:hover, :focus-visible) .slide-arrow {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0) scaleX(1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .slide-icon,
+    .slide-label,
+    .slide-arrow {
+      transition-duration: 0ms;
+    }
   }
 </style>
 
 <script>
-  // Pulls the button towards the pointer once it comes close, the label a bit further.
-  const canHover = matchMedia('(hover: hover) and (pointer: fine)').matches;
-  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  if (canHover && !reducedMotion) {
-    const buttons = [...document.querySelectorAll<HTMLElement>('[data-magnetic]')];
-    let frame = 0;
-
-    window.addEventListener('pointermove', (event) => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        for (const button of buttons) {
-          const label = button.querySelector<HTMLElement>('[data-magnetic-label]');
-          const rect = button.getBoundingClientRect();
-          // Measure from the resting position, not the pulled one.
-          const shiftX = parseFloat(button.style.getPropertyValue('--mx')) || 0;
-          const shiftY = parseFloat(button.style.getPropertyValue('--my')) || 0;
-          const centerX = rect.left - shiftX + rect.width / 2;
-          const centerY = rect.top - shiftY + rect.height / 2;
-          const dx = event.clientX - centerX;
-          const dy = event.clientY - centerY;
-          const reach = rect.width / 2 + 16;
-
-          if (Math.hypot(dx, dy) < reach) {
-            button.classList.add('is-pulled');
-            button.style.setProperty('--mx', `${dx * 0.025}px`);
-            button.style.setProperty('--my', `${dy * 0.04}px`);
-            label?.style.setProperty('--lx', `${dx * 0.01}px`);
-            label?.style.setProperty('--ly', `${dy * 0.015}px`);
-            button.style.setProperty('--px', `${event.clientX - rect.left}px`);
-            button.style.setProperty('--py', `${event.clientY - rect.top}px`);
-          } else if (button.classList.contains('is-pulled')) {
-            button.classList.remove('is-pulled');
-            for (const name of ['--mx', '--my']) button.style.removeProperty(name);
-            for (const name of ['--lx', '--ly']) label?.style.removeProperty(name);
-          }
-        }
-      });
+  // Moves the glass highlight with the pointer.
+  for (const button of document.querySelectorAll<HTMLElement>('[data-glass]')) {
+    button.addEventListener('pointermove', (event) => {
+      const rect = button.getBoundingClientRect();
+      button.style.setProperty('--px', `${event.clientX - rect.left}px`);
+      button.style.setProperty('--py', `${event.clientY - rect.top}px`);
     });
   }
 </script>
