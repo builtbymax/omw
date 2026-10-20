@@ -40,7 +40,7 @@ ditto -c -k --sequesterRsrc --keepParent build/omw.app "$ZIP"
 spctl --assess --type execute build/omw.app
 
 # The appcast only lists this release, Sparkle just needs the newest one.
-.build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+.build/artifacts/sparkle/Sparkle/bin/generate_appcast --embed-release-notes \
   --download-url-prefix "https://github.com/builtbymax/omw/releases/download/v$VERSION/" "$OUT"
 
 echo "\nRelease ready in $OUT. Publish it with:"
