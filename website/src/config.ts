@@ -1,8 +1,8 @@
-// The GitHub repo is private for now, so release downloads need a login.
-// Point this at a public URL (the zip Sparkle's appcast references) once there is one.
-export const downloadUrl = 'https://github.com/builtbymax/omw/releases/latest';
+export const version = '1.0.0';
 
-export const version = '0.2.0';
+// The notarized zip of that exact version, so the button keeps working while the site lags behind a release.
+export const downloadUrl = `https://github.com/builtbymax/omw/releases/download/v${version}/omw-${version}.zip`;
+
 export const minimumMacOS = '14';
 export const domain = 'omw.halftime.space';
 export const brewCommand = 'brew install --cask builtbymax/tap/omw';
