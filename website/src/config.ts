@@ -1,4 +1,4 @@
-export const version = '1.0.0';
+export const version = '1.0.1';
 
 // The notarized zip of that exact version, so the button keeps working while the site lags behind a release.
 export const downloadUrl = `https://github.com/builtbymax/omw/releases/download/v${version}/omw-${version}.zip`;
