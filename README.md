@@ -125,5 +125,4 @@ make release VERSION=0.2.0   # universal build, Developer ID signing, notarizati
 
 The output in `build/releases/0.2.0/` (the zip and `appcast.xml`) goes onto the GitHub release `v0.2.0`.
 Installed copies find it through `SUFeedURL` and update themselves with [Sparkle](https://sparkle-project.org).
-See [RELEASING.md](RELEASING.md) for the one-time setup (certificate, notary credentials, Sparkle keys)
-and the release checklist.
+See [release-checklist.md](release-checklist.md) for the steps of a release.

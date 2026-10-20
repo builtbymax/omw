@@ -5,3 +5,5 @@ build/
 .vscode/
 *.p12
 *.cer
+.env*
+.claude/
