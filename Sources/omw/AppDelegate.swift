@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "rectangle.split.3x1", accessibilityDescription: "omw")
+        statusItem.button?.image = Self.menuBarIcon()
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -188,6 +188,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // is often refused then, leaving Settings behind the frontmost app. Force it.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// The snap mark from the app icon, as a template image so it follows the menu bar's appearance.
+    private static func menuBarIcon() -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
+            // The mark's 56-unit artwork, scaled to 15 pt and centered.
+            let scale: CGFloat = 15 / 56
+            let path = NSBezierPath()
+            for rotated in [false, true] {
+                let mark = NSBezierPath()
+                mark.move(to: NSPoint(x: 34, y: 0))
+                mark.line(to: NSPoint(x: 10, y: 0))
+                mark.appendArc(from: NSPoint(x: 0, y: 0), to: NSPoint(x: 0, y: 10), radius: 10)
+                mark.line(to: NSPoint(x: 0, y: 34))
+                mark.line(to: NSPoint(x: 10, y: 34))
+                mark.line(to: NSPoint(x: 10, y: 12))
+                mark.appendArc(from: NSPoint(x: 10, y: 10), to: NSPoint(x: 12, y: 10), radius: 2)
+                mark.line(to: NSPoint(x: 34, y: 10))
+                mark.close()
+                if rotated {
+                    // The bottom-right corner is the top-left one turned half way around.
+                    mark.transform(using: AffineTransform(m11: -1, m12: 0, m21: 0, m22: -1, tX: 56, tY: 56))
+                }
+                path.append(mark)
+            }
+            path.transform(using: AffineTransform(scale: scale))
+            path.transform(using: AffineTransform(translationByX: 1.5, byY: 1.5))
+            NSColor.black.setFill()
+            path.fill()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "omw"
+        return image
     }
 
     /// Menu-bar apps have no visible main menu, but text fields still need the Edit shortcuts.
