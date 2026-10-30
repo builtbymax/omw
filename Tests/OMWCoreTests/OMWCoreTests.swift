@@ -439,6 +439,16 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
 
 /// The socket server against clients that misbehave. Every test runs its own server on a temporary socket.
 @Suite struct RemoteServerTests {
+    /// Blocking clients must not occupy Swift Testing's cooperative executor: on small runners,
+    /// they can starve the dispatch queues that need to accept and answer those same clients.
+    private static func onThread(_ body: @escaping @Sendable () throws -> Void) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            Thread {
+                continuation.resume(with: Result { try body() })
+            }.start()
+        }
+    }
+
     private final class Server {
         let path = NSTemporaryDirectory() + "omw-test-\(UUID().uuidString.prefix(8)).sock"
         let server: RemoteServer
@@ -484,54 +494,66 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
 
     private static let undo = String(decoding: try! JSONEncoder().encode(RemoteCommand.undo), as: UTF8.self)
 
-    @Test func survivesClientsThatLeaveBeforeTheAnswer() throws {
-        let server = try Server(delay: 0.2)
-        let client = try server.connect()
-        Self.send(client, Self.undo)
-        shutdown(client, SHUT_WR)
-        close(client)
-        // Writing the answer to the closed connection used to kill the process with SIGPIPE.
-        Thread.sleep(forTimeInterval: 0.4)
-        #expect(try RemoteSocket.request(.layouts, at: server.path) == .success("layouts"))
-    }
-
-    @Test func slowClientsDontHoldUpOthers() throws {
-        let server = try Server(timeout: 1)
-        let slow = try server.connect()
-        defer { close(slow) }
-        let trickle = Thread {
-            for _ in 0..<10 {
-                Self.send(slow, " ")
-                Thread.sleep(forTimeInterval: 0.2)
-            }
+    @Test func survivesClientsThatLeaveBeforeTheAnswer() async throws {
+        try await Self.onThread {
+            let server = try Server(delay: 0.2)
+            let client = try server.connect()
+            Self.send(client, Self.undo)
+            shutdown(client, SHUT_WR)
+            close(client)
+            // Writing the answer to the closed connection used to kill the process with SIGPIPE.
+            Thread.sleep(forTimeInterval: 0.4)
+            #expect(try RemoteSocket.request(.layouts, at: server.path) == .success("layouts"))
         }
-        trickle.start()
-
-        let start = Date()
-        #expect(try RemoteSocket.request(.layouts, at: server.path) == .success("layouts"))
-        #expect(Date().timeIntervalSince(start) < 0.5)
-        // A byte every 0.2 s doesn't extend the deadline for the whole command.
-        #expect(Self.response(from: slow) == .failure("The command didn't arrive in time."))
-        #expect(Date().timeIntervalSince(start) < 1.8)
     }
 
-    @Test func turnsAwayClientsOverTheLimit() throws {
-        let server = try Server(maxClients: 1, timeout: 2)
-        let idle = try server.connect()
-        defer { close(idle) }
-        Thread.sleep(forTimeInterval: 0.1)
-        #expect(try RemoteSocket.request(.layouts, at: server.path) == .failure("omw is busy with other commands, try again."))
-        shutdown(idle, SHUT_WR)
-        #expect(Self.response(from: idle) == .failure("omw didn't understand the command. Are the CLI and the app the same version?"))
-        #expect(try RemoteSocket.request(.layouts, at: server.path) == .success("layouts"))
+    @Test func slowClientsDontHoldUpOthers() async throws {
+        try await Self.onThread {
+            let server = try Server(timeout: 1)
+            let slow = try server.connect()
+            defer { close(slow) }
+            let finished = DispatchSemaphore(value: 0)
+            let trickle = Thread {
+                defer { finished.signal() }
+                for _ in 0..<10 {
+                    Self.send(slow, " ")
+                    Thread.sleep(forTimeInterval: 0.2)
+                }
+            }
+            trickle.start()
+            // Keep the descriptor open until the writer stops, so it cannot write to a reused fd.
+            defer { finished.wait() }
+
+            let start = Date()
+            #expect(try RemoteSocket.request(.layouts, at: server.path) == .success("layouts"))
+            #expect(Date().timeIntervalSince(start) < 0.5)
+            // A byte every 0.2 s doesn't extend the deadline for the whole command.
+            #expect(Self.response(from: slow) == .failure("The command didn't arrive in time."))
+            #expect(Date().timeIntervalSince(start) < 1.8)
+        }
     }
 
-    @Test func rejectsOversizedCommands() throws {
-        let server = try Server()
-        let client = try server.connect()
-        defer { close(client) }
-        Self.send(client, String(repeating: " ", count: RemoteSocket.maxRequestSize + 1))
-        shutdown(client, SHUT_WR)
-        #expect(Self.response(from: client) == .failure("The command is too large."))
+    @Test func turnsAwayClientsOverTheLimit() async throws {
+        try await Self.onThread {
+            let server = try Server(maxClients: 1, timeout: 2)
+            let idle = try server.connect()
+            defer { close(idle) }
+            Thread.sleep(forTimeInterval: 0.1)
+            #expect(try RemoteSocket.request(.layouts, at: server.path) == .failure("omw is busy with other commands, try again."))
+            shutdown(idle, SHUT_WR)
+            #expect(Self.response(from: idle) == .failure("omw didn't understand the command. Are the CLI and the app the same version?"))
+            #expect(try RemoteSocket.request(.layouts, at: server.path) == .success("layouts"))
+        }
+    }
+
+    @Test func rejectsOversizedCommands() async throws {
+        try await Self.onThread {
+            let server = try Server()
+            let client = try server.connect()
+            defer { close(client) }
+            Self.send(client, String(repeating: " ", count: RemoteSocket.maxRequestSize + 1))
+            shutdown(client, SHUT_WR)
+            #expect(Self.response(from: client) == .failure("The command is too large."))
+        }
     }
 }
