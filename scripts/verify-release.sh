@@ -34,7 +34,7 @@ ok "zip and appcast match the manifest"
 swift scripts/verify-sparkle.swift "$PUBLIC_KEY" "$DIR/appcast.xml" "$ZIP" >/dev/null
 ok "feed and archive signatures are valid for SUPublicEDKey"
 
-git fetch --quiet --tags origin
+but pull --check
 [[ "$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")" == "$(field commit)" ]] || fail "$TAG isn't the commit in the manifest ($(field commit))"
 ok "$TAG is commit $(field commit)"
 
