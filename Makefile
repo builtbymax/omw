@@ -22,7 +22,7 @@ install: build
 test:
 	swift test $(TEST_FLAGS)
 
-# make release VERSION=1.0.2 (see scripts/release.sh for the one-time setup)
+# make release VERSION=1.0.3 (see scripts/release.sh for the one-time setup)
 release:
 	./scripts/release.sh $(VERSION)
 
