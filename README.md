@@ -40,6 +40,7 @@ and installed copies update themselves with [Sparkle](https://sparkle-project.or
 | `⌃⌥Space` | Open the omw launcher: type a layout name (`code`, `20/60`, `halves`…) and press `↩` |
 | `⌃⌥⌘←` / `⌃⌥⌘→` | Move the focused window one column left/right, swapping with the window there |
 | `⌃⌥⌘↑` / `⌃⌥⌘↓` | Move the focused window to the row above/below. In a column without rows: top/bottom half (again: back to full height) |
+| `⌃⌥⇧⌘` + arrow | The same moves without swapping: the window already there stays put and shares the column |
 | `⌃⌥⌘]` / `⌃⌥⌘[` | Move the focused window to the matching column on the next/previous display |
 | `⌃⌥⇧→` / `⌃⌥⇧←` | Move the focused window to the next/previous workspace (Space) |
 | `⌃⌥1`…`⌃⌥5` | Apply Halves, Thirds, Code, Main Left, Main Right (new configs only) |
@@ -110,6 +111,7 @@ admin password if needed), so it stays up to date with the app.
 omw apply code                    # by name or ratios, like the launcher: "halves", "20/60", "1:2:1"
 omw apply 20/60/20 --display 2    # display by number (see `omw displays`) or name
 omw move left|right|up|down       # the focused window, like the hotkeys
+omw move left --no-swap           # leave the window that's there in place
 omw move --display next|previous
 omw move --space next|previous
 omw refresh                       # place windows opened since the layout was applied
@@ -122,6 +124,10 @@ omw reload                        # re-read config.json
 
 Exit codes: `0` done, `1` the command failed (unknown layout, no Accessibility access, no workspace in
 that direction…), `2` wrong usage, `3` omw isn't running. Errors go to stderr.
+
+The CLI talks to the app over a Unix socket in `~/Library/Application Support/omw` that only your user can open.
+omw runs commands from anything that connects to it, not only from the bundled CLI: programs running as your user
+can control omw anyway.
 
 ## Build it yourself
 

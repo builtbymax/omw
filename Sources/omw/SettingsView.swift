@@ -486,7 +486,7 @@ private struct GapPicker: View {
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { gap = value }
                 } label: {
-                    Text("\(Int(value)) pt")
+                    Text(String(format: "%.0f pt", value))
                         .font(.system(size: 12, weight: selected ? .semibold : .medium))
                         .fixedSize()
                         .foregroundStyle(selected ? Color.primary : .secondary)

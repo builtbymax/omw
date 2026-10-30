@@ -137,14 +137,15 @@ public enum Arranger {
         return matches(top) ? column : bottom
     }
 
-    /// Moves the window at `index` one cell over (see `Layout.neighbour`) and swaps it with the frontmost
-    /// window in the target cell. Returns nil if there is no cell in that direction.
-    public static func move(_ index: Int, dx: Int, dy: Int, in assignment: [Int], layout: Layout) -> [Int]? {
+    /// Moves the window at `index` one cell over (see `Layout.neighbour`). With `swap`, the frontmost
+    /// window in the target cell takes its old cell, otherwise it's layered into the target cell.
+    /// Returns nil if there is no cell in that direction.
+    public static func move(_ index: Int, dx: Int, dy: Int, in assignment: [Int], layout: Layout, swap: Bool = true) -> [Int]? {
         let from = assignment[index]
         guard let to = layout.neighbour(of: from, dx: dx, dy: dy) else { return nil }
         var next = assignment
         next[index] = to
-        if let partner = assignment.indices.first(where: { $0 != index && assignment[$0] == to }) {
+        if swap, let partner = assignment.indices.first(where: { $0 != index && assignment[$0] == to }) {
             next[partner] = from
         }
         return next

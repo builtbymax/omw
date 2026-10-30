@@ -7,13 +7,18 @@ public enum Accent: String, Codable, CaseIterable, Sendable {
 
 public struct Config: Codable, Equatable {
     public var layouts: [Layout]
-    /// Space in points around and between windows.
+    /// Space in points around and between windows, 0 to `maxGap`.
     public var gap: Double
     public var overlayShortcut: Shortcut?
     public var moveLeftShortcut: Shortcut?
     public var moveRightShortcut: Shortcut?
     public var moveUpShortcut: Shortcut?
     public var moveDownShortcut: Shortcut?
+    /// Like the moves above, but the window already in the target cell stays there.
+    public var moveLeftNoSwapShortcut: Shortcut?
+    public var moveRightNoSwapShortcut: Shortcut?
+    public var moveUpNoSwapShortcut: Shortcut?
+    public var moveDownNoSwapShortcut: Shortcut?
     public var moveToNextDisplayShortcut: Shortcut?
     public var moveToPreviousDisplayShortcut: Shortcut?
     public var moveToNextSpaceShortcut: Shortcut?
@@ -39,6 +44,10 @@ public struct Config: Codable, Equatable {
         moveRightShortcut: Shortcut? = Shortcut(string: "ctrl+opt+cmd+right"),
         moveUpShortcut: Shortcut? = Shortcut(string: "ctrl+opt+cmd+up"),
         moveDownShortcut: Shortcut? = Shortcut(string: "ctrl+opt+cmd+down"),
+        moveLeftNoSwapShortcut: Shortcut? = Shortcut(string: "ctrl+opt+shift+cmd+left"),
+        moveRightNoSwapShortcut: Shortcut? = Shortcut(string: "ctrl+opt+shift+cmd+right"),
+        moveUpNoSwapShortcut: Shortcut? = Shortcut(string: "ctrl+opt+shift+cmd+up"),
+        moveDownNoSwapShortcut: Shortcut? = Shortcut(string: "ctrl+opt+shift+cmd+down"),
         moveToNextDisplayShortcut: Shortcut? = Shortcut(string: "ctrl+opt+cmd+]"),
         moveToPreviousDisplayShortcut: Shortcut? = Shortcut(string: "ctrl+opt+cmd+["),
         moveToNextSpaceShortcut: Shortcut? = Shortcut(string: "ctrl+opt+shift+right"),
@@ -58,6 +67,10 @@ public struct Config: Codable, Equatable {
         self.moveRightShortcut = moveRightShortcut
         self.moveUpShortcut = moveUpShortcut
         self.moveDownShortcut = moveDownShortcut
+        self.moveLeftNoSwapShortcut = moveLeftNoSwapShortcut
+        self.moveRightNoSwapShortcut = moveRightNoSwapShortcut
+        self.moveUpNoSwapShortcut = moveUpNoSwapShortcut
+        self.moveDownNoSwapShortcut = moveDownNoSwapShortcut
         self.moveToNextDisplayShortcut = moveToNextDisplayShortcut
         self.moveToPreviousDisplayShortcut = moveToPreviousDisplayShortcut
         self.moveToNextSpaceShortcut = moveToNextSpaceShortcut
@@ -71,8 +84,11 @@ public struct Config: Codable, Equatable {
         self.lastLayoutID = lastLayoutID
     }
 
+    public static let maxGap = 100.0
+
     private enum CodingKeys: String, CodingKey {
         case layouts, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
+        case moveLeftNoSwapShortcut, moveRightNoSwapShortcut, moveUpNoSwapShortcut, moveDownNoSwapShortcut
         case moveToNextDisplayShortcut, moveToPreviousDisplayShortcut, moveToNextSpaceShortcut, moveToPreviousSpaceShortcut
         case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, accent, lastLayoutID
     }
@@ -86,11 +102,18 @@ public struct Config: Codable, Equatable {
         }
         layouts = try c.decodeIfPresent([Layout].self, forKey: .layouts) ?? d.layouts
         gap = try c.decodeIfPresent(Double.self, forKey: .gap) ?? d.gap
+        guard gap.isFinite, (0...Self.maxGap).contains(gap) else {
+            throw DecodingError.dataCorruptedError(forKey: .gap, in: c, debugDescription: "\"gap\" needs to be between 0 and \(Int(Self.maxGap)).")
+        }
         overlayShortcut = try shortcut(.overlayShortcut, d.overlayShortcut)
         moveLeftShortcut = try shortcut(.moveLeftShortcut, d.moveLeftShortcut)
         moveRightShortcut = try shortcut(.moveRightShortcut, d.moveRightShortcut)
         moveUpShortcut = try shortcut(.moveUpShortcut, d.moveUpShortcut)
         moveDownShortcut = try shortcut(.moveDownShortcut, d.moveDownShortcut)
+        moveLeftNoSwapShortcut = try shortcut(.moveLeftNoSwapShortcut, d.moveLeftNoSwapShortcut)
+        moveRightNoSwapShortcut = try shortcut(.moveRightNoSwapShortcut, d.moveRightNoSwapShortcut)
+        moveUpNoSwapShortcut = try shortcut(.moveUpNoSwapShortcut, d.moveUpNoSwapShortcut)
+        moveDownNoSwapShortcut = try shortcut(.moveDownNoSwapShortcut, d.moveDownNoSwapShortcut)
         moveToNextDisplayShortcut = try shortcut(.moveToNextDisplayShortcut, d.moveToNextDisplayShortcut)
         moveToPreviousDisplayShortcut = try shortcut(.moveToPreviousDisplayShortcut, d.moveToPreviousDisplayShortcut)
         moveToNextSpaceShortcut = try shortcut(.moveToNextSpaceShortcut, d.moveToNextSpaceShortcut)
@@ -114,6 +137,10 @@ public struct Config: Codable, Equatable {
         try c.encode(moveRightShortcut, forKey: .moveRightShortcut)
         try c.encode(moveUpShortcut, forKey: .moveUpShortcut)
         try c.encode(moveDownShortcut, forKey: .moveDownShortcut)
+        try c.encode(moveLeftNoSwapShortcut, forKey: .moveLeftNoSwapShortcut)
+        try c.encode(moveRightNoSwapShortcut, forKey: .moveRightNoSwapShortcut)
+        try c.encode(moveUpNoSwapShortcut, forKey: .moveUpNoSwapShortcut)
+        try c.encode(moveDownNoSwapShortcut, forKey: .moveDownNoSwapShortcut)
         try c.encode(moveToNextDisplayShortcut, forKey: .moveToNextDisplayShortcut)
         try c.encode(moveToPreviousDisplayShortcut, forKey: .moveToPreviousDisplayShortcut)
         try c.encode(moveToNextSpaceShortcut, forKey: .moveToNextSpaceShortcut)

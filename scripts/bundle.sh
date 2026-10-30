@@ -12,8 +12,9 @@ cd "${0:A:h}/.."
 
 ARCH_FLAGS=()
 [[ "${OMW_UNIVERSAL:-}" == 1 ]] && ARCH_FLAGS=(--arch arm64 --arch x86_64)
-swift build -c release $ARCH_FLAGS
-BIN_DIR="$(swift build -c release $ARCH_FLAGS --show-bin-path)"
+# Exactly the dependency versions in Package.resolved, never newer ones.
+swift build -c release --force-resolved-versions $ARCH_FLAGS
+BIN_DIR="$(swift build -c release --force-resolved-versions $ARCH_FLAGS --show-bin-path)"
 
 APP=build/omw.app
 rm -rf "$APP"

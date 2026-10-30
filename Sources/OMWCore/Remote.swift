@@ -17,7 +17,7 @@ public enum RemoteCommand: Codable, Equatable, Sendable {
 
     Commands:
       apply <layout> [--display <name|number>]   Apply a layout by name or ratios ("code", "20/60", "halves")
-      move left|right|up|down                    Move the focused window to the neighbouring cell
+      move left|right|up|down [--no-swap]        Move the focused window to the neighbouring cell
       move --display next|previous               Move the focused window to another display
       move --space next|previous                 Move the focused window to another workspace
       refresh                                    Place windows opened since the layout was applied
@@ -68,9 +68,18 @@ public enum RemoteCommand: Codable, Equatable, Sendable {
     }
 }
 
+extension RemoteCommand {
+    /// The 0-based index for a display number from `omw displays`, nil when there's no such display.
+    /// Checked before subtracting, which would overflow for Int.min.
+    public static func displayIndex(number: Int, count: Int) -> Int? {
+        number >= 1 && number <= count ? number - 1 : nil
+    }
+}
+
 /// The window commands, as the CLI names them.
 public enum WindowMove: String, Codable, CaseIterable, Sendable {
     case left, right, up, down
+    case leftNoSwap, rightNoSwap, upNoSwap, downNoSwap
     case nextDisplay, previousDisplay
     case nextSpace, previousSpace
 
@@ -80,11 +89,15 @@ public enum WindowMove: String, Codable, CaseIterable, Sendable {
         case ["right"]: .right
         case ["up"]: .up
         case ["down"]: .down
+        case ["left", "--no-swap"], ["--no-swap", "left"]: .leftNoSwap
+        case ["right", "--no-swap"], ["--no-swap", "right"]: .rightNoSwap
+        case ["up", "--no-swap"], ["--no-swap", "up"]: .upNoSwap
+        case ["down", "--no-swap"], ["--no-swap", "down"]: .downNoSwap
         case ["--display", "next"]: .nextDisplay
         case ["--display", "previous"]: .previousDisplay
         case ["--space", "next"]: .nextSpace
         case ["--space", "previous"]: .previousSpace
-        default: throw UsageError("Try: omw move left|right|up|down, omw move --display next|previous or omw move --space next|previous")
+        default: throw UsageError("Try: omw move left|right|up|down [--no-swap], omw move --display next|previous or omw move --space next|previous")
         }
     }
 }
@@ -143,21 +156,30 @@ public enum RemoteError: Error, Equatable {
     }
 }
 
-/// A Unix socket in Application Support: the CLI writes one JSON command, the app answers with one
-/// JSON response and closes the connection.
+/// A Unix socket in Application Support. The CLI writes one JSON command and closes its writing side,
+/// which ends the request. The app answers with one JSON response and closes the connection.
+///
+/// Only this user can connect (mode 0600), and the app trusts whatever does: any process of the user
+/// can already control omw through Accessibility or just quit it, so the CLI isn't authenticated.
 public enum RemoteSocket {
     public static var defaultPath: String {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/omw/omw.sock").path
     }
 
-    /// Sends a command to the app and waits for its answer.
+    /// Commands are a few hundred bytes, anything bigger is rejected.
+    public static let maxRequestSize = 64 << 10
+    /// Answers list every layout or display, so they get more room.
+    static let maxResponseSize = 1 << 20
+
+    /// Sends a command to the app and waits at most `timeout` for its answer.
     public static func request(_ command: RemoteCommand, at path: String = defaultPath, timeout: TimeInterval = 15) throws -> RemoteResponse {
         guard var address = address(for: path) else { throw RemoteError.failed("Socket path is too long: \(path)") }
+        let deadline = DispatchTime.now() + timeout
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw RemoteError.failed("Could not create a socket.") }
         defer { close(fd) }
-        setTimeout(fd, timeout)
+        guard configure(fd, sendTimeout: timeout) else { throw RemoteError.failed("Could not set up the socket: \(String(cString: strerror(errno)))") }
         let connected = withSockaddr(&address) { connect(fd, $0, $1) }
         guard connected == 0 else {
             throw [ENOENT, ECONNREFUSED].contains(errno) ? RemoteError.notRunning : RemoteError.failed(String(cString: strerror(errno)))
@@ -165,7 +187,12 @@ public enum RemoteSocket {
         let request = try JSONEncoder().encode(command)
         guard writeAll(fd, request) else { throw RemoteError.failed("Could not send the command to omw.") }
         shutdown(fd, SHUT_WR)
-        let data = readAll(fd)
+        let data: Data
+        switch readAll(fd, limit: maxResponseSize, until: deadline) {
+        case let .complete(complete): data = complete
+        case .timedOut: throw RemoteError.failed("omw didn't answer in time.")
+        case .tooLarge, .failed: throw RemoteError.failed("omw didn't answer.")
+        }
         guard !data.isEmpty else { throw RemoteError.failed("omw didn't answer.") }
         guard let response = try? JSONDecoder().decode(RemoteResponse.self, from: data) else {
             throw RemoteError.failed("omw sent an answer the CLI doesn't understand. Are both the same version?")
@@ -188,17 +215,32 @@ public enum RemoteSocket {
         return fd
     }
 
-    /// Reads one command from an accepted connection, answers it and closes the connection.
-    public static func serve(_ client: Int32, handler: (RemoteCommand) -> RemoteResponse) {
+    /// Reads one command from an accepted connection, answers it and closes the connection. The whole
+    /// command has to arrive within `timeout`, so a client sending a byte now and then can't keep it open.
+    public static func serve(_ client: Int32, timeout: TimeInterval = 5, handler: (RemoteCommand) -> RemoteResponse) {
         defer { close(client) }
-        setTimeout(client, 5)
+        guard configure(client, sendTimeout: timeout) else { return }
         let response: RemoteResponse
-        if let command = try? JSONDecoder().decode(RemoteCommand.self, from: readAll(client)) {
-            response = handler(command)
-        } else {
-            response = .failure("omw didn't understand the command. Are the CLI and the app the same version?")
+        switch readAll(client, limit: maxRequestSize, until: .now() + timeout) {
+        case let .complete(data):
+            if let command = try? JSONDecoder().decode(RemoteCommand.self, from: data) {
+                response = handler(command)
+            } else {
+                response = .failure("omw didn't understand the command. Are the CLI and the app the same version?")
+            }
+        case .tooLarge: response = .failure("The command is too large.")
+        case .timedOut: response = .failure("The command didn't arrive in time.")
+        case .failed: return
         }
+        // The client may be gone by now, which is fine: the write just fails.
         if let data = try? JSONEncoder().encode(response) { _ = writeAll(client, data) }
+    }
+
+    /// Answers without reading the command, e.g. when too many clients are connected.
+    static func reject(_ client: Int32, with response: RemoteResponse) {
+        defer { close(client) }
+        guard configure(client, sendTimeout: 1), let data = try? JSONEncoder().encode(response) else { return }
+        _ = writeAll(client, data)
     }
 
     private static func address(for path: String) -> sockaddr_un? {
@@ -217,23 +259,46 @@ public enum RemoteSocket {
         }
     }
 
-    private static func setTimeout(_ fd: Int32, _ seconds: TimeInterval) {
-        var time = timeval(tv_sec: Int(seconds), tv_usec: 0)
-        let size = socklen_t(MemoryLayout<timeval>.size)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &time, size)
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &time, size)
+    /// Writes to a closed connection fail with EPIPE instead of raising SIGPIPE, which would kill the
+    /// process, and give up after `sendTimeout`.
+    private static func configure(_ fd: Int32, sendTimeout: TimeInterval) -> Bool {
+        var on: Int32 = 1
+        let seconds = sendTimeout.rounded(.down)
+        var time = timeval(tv_sec: Int(seconds), tv_usec: Int32((sendTimeout - seconds) * 1_000_000))
+        return setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size)) == 0
+            && setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &time, socklen_t(MemoryLayout<timeval>.size)) == 0
     }
 
-    /// Reads until the other side closes, at most 1 MB.
-    private static func readAll(_ fd: Int32) -> Data {
+    private enum ReadResult {
+        case complete(Data)
+        case tooLarge, timedOut, failed
+    }
+
+    /// Reads until the other side closes its writing end. Fails past `limit` bytes or `deadline`,
+    /// which counts for the whole message, not for each read.
+    private static func readAll(_ fd: Int32, limit: Int, until deadline: DispatchTime) -> ReadResult {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
-        while data.count < 1 << 20 {
+        while true {
+            let now = DispatchTime.now()
+            guard now < deadline else { return .timedOut }
+            let remaining = (deadline.uptimeNanoseconds - now.uptimeNanoseconds + 999_999) / 1_000_000
+            var entry = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&entry, 1, Int32(clamping: remaining))
+            if ready < 0 {
+                if errno == EINTR { continue }
+                return .failed
+            }
+            if ready == 0 { return .timedOut }
             let count = read(fd, &buffer, buffer.count)
-            guard count > 0 else { break }
+            if count == 0 { return .complete(data) }
+            if count < 0 {
+                if errno == EINTR || errno == EAGAIN { continue }
+                return .failed
+            }
+            guard data.count + count <= limit else { return .tooLarge }
             data.append(buffer, count: count)
         }
-        return data
     }
 
     private static func writeAll(_ fd: Int32, _ data: Data) -> Bool {
@@ -241,10 +306,58 @@ public enum RemoteSocket {
             var offset = 0
             while offset < raw.count {
                 let written = write(fd, raw.baseAddress! + offset, raw.count - offset)
+                if written < 0, errno == EINTR { continue }
                 guard written > 0 else { return false }
                 offset += written
             }
             return true
+        }
+    }
+}
+
+/// Accepts connections on a socket from `RemoteSocket.listen` and serves each one on its own, so a slow
+/// client doesn't hold up the others. Up to `maxClients` at a time, more get a "busy" answer right away.
+public final class RemoteServer: @unchecked Sendable {
+    private let listener: Int32
+    private let timeout: TimeInterval
+    private let slots: DispatchSemaphore
+    private let handler: @Sendable (RemoteCommand) -> RemoteResponse
+    private let clients = DispatchQueue(label: "omw.remote.clients", attributes: .concurrent)
+    private var source: DispatchSourceRead?
+
+    /// `handler` runs on a background queue, for several clients at once.
+    public init(listener: Int32, maxClients: Int = 4, timeout: TimeInterval = 5,
+                handler: @escaping @Sendable (RemoteCommand) -> RemoteResponse) {
+        self.listener = listener
+        self.timeout = timeout
+        slots = DispatchSemaphore(value: maxClients)
+        self.handler = handler
+    }
+
+    public func start() {
+        let source = DispatchSource.makeReadSource(fileDescriptor: listener, queue: DispatchQueue(label: "omw.remote"))
+        source.setEventHandler { [self] in acceptClient() }
+        source.setCancelHandler { [listener] in close(listener) }
+        source.resume()
+        self.source = source
+    }
+
+    /// Stops accepting connections and closes the listening socket.
+    public func stop() {
+        source?.cancel()
+        source = nil
+    }
+
+    private func acceptClient() {
+        let client = accept(listener, nil, nil)
+        guard client >= 0 else { return }
+        guard slots.wait(timeout: .now()) == .success else {
+            RemoteSocket.reject(client, with: .failure("omw is busy with other commands, try again."))
+            return
+        }
+        clients.async { [self] in
+            defer { slots.signal() }
+            RemoteSocket.serve(client, timeout: timeout, handler: handler)
         }
     }
 }

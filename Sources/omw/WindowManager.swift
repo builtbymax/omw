@@ -119,9 +119,10 @@ final class WindowManager {
         return nil
     }
 
-    /// Moves the focused window one cell left/right (dx) or up/down (dy), swapping it with the window that's there.
+    /// Moves the focused window one cell left/right (dx) or up/down (dy). With `swap`, the window that's
+    /// there takes its old cell, otherwise it stays and the two share the cell.
     @discardableResult
-    func moveFocused(dx: Int, dy: Int) -> ActionError? {
+    func moveFocused(dx: Int, dy: Int, swap: Bool = true) -> ActionError? {
         guard ensureTrusted() else { return .notTrusted }
         guard let focused = AX.focusedWindow(),
               let focusedID = AX.windowID(of: focused),
@@ -132,7 +133,7 @@ final class WindowManager {
 
         let area = screen.axVisibleFrame
         let current = Arranger.assign(snapshots(windows), layout: layout, in: area, pinned: false, balanced: false)
-        guard let next = Arranger.move(index, dx: dx, dy: dy, in: current, layout: layout) else {
+        guard let next = Arranger.move(index, dx: dx, dy: dy, in: current, layout: layout, swap: swap) else {
             NSSound.beep()
             return .edge
         }
@@ -149,6 +150,10 @@ final class WindowManager {
         case .moveRight: moveFocused(dx: 1, dy: 0)
         case .moveUp: moveFocusedVertically(-1)
         case .moveDown: moveFocusedVertically(1)
+        case .moveLeftNoSwap: moveFocused(dx: -1, dy: 0, swap: false)
+        case .moveRightNoSwap: moveFocused(dx: 1, dy: 0, swap: false)
+        case .moveUpNoSwap: moveFocusedVertically(-1, swap: false)
+        case .moveDownNoSwap: moveFocusedVertically(1, swap: false)
         case .nextDisplay: moveFocusedToDisplay(by: 1)
         case .previousDisplay: moveFocusedToDisplay(by: -1)
         case .nextSpace: moveFocusedToSpace(by: 1)
@@ -157,14 +162,14 @@ final class WindowManager {
     }
 
     /// In a column with rows, the row above or below. Otherwise the top half, bottom half or full height of the column.
-    private func moveFocusedVertically(_ direction: Int) -> ActionError? {
+    private func moveFocusedVertically(_ direction: Int, swap: Bool = true) -> ActionError? {
         guard ensureTrusted() else { return .notTrusted }
         guard let window = AX.focusedManagedWindow(), let screen = AX.screen(containing: window.frame) else { return .noFocusedWindow }
         let layout = layout(for: screen)
         let area = screen.axVisibleFrame
         let index = layout.nearestFilledColumn(to: Arranger.columnIndex(forX: window.frame.midX, layout: layout, in: area))
         if layout.rowCounts[index] > 1 {
-            return moveFocused(dx: 0, dy: direction)
+            return moveFocused(dx: 0, dy: direction, swap: swap)
         }
         let column = Arranger.columns(for: layout, in: area, gap: store.config.gap)[index]
         let target = Arranger.verticalSlot(for: window.frame, in: column, direction: direction, gap: store.config.gap)
