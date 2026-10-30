@@ -122,6 +122,17 @@ enum AX {
         return result.sorted { zOrder[$0.windowID]! < zOrder[$1.windowID]! }
     }
 
+    /// The Dock's icon strip as it is on screen right now, or nil when it hides itself.
+    static func dockFrame() -> CGRect? {
+        CFPreferencesAppSynchronize("com.apple.dock" as CFString)
+        if CFPreferencesGetAppBooleanValue("autohide" as CFString, "com.apple.dock" as CFString, nil) { return nil }
+        guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first,
+              let children = copy(AXUIElementCreateApplication(dock.processIdentifier), kAXChildrenAttribute) as? [AXUIElement],
+              let list = children.first(where: { copy($0, kAXRoleAttribute) as? String == kAXListRole }),
+              let frame = frame(of: list), !frame.isEmpty else { return nil }
+        return frame
+    }
+
     static func hasEnhancedUI(_ window: ManagedWindow) -> Bool {
         copy(window.app, "AXEnhancedUserInterface") as? Bool == true
     }
@@ -165,7 +176,22 @@ extension NSScreen {
 
     /// Frame in top-left origin coordinates, as used by the Accessibility API.
     var axFrame: CGRect { Self.toAX(frame) }
-    var axVisibleFrame: CGRect { Self.toAX(visibleFrame) }
+
+    /// `visibleFrame` in top-left origin coordinates. AppKit caches it and doesn't always refresh it when
+    /// the Dock changes (seen after display changes in a long-running omw), so windows ended up behind the Dock.
+    /// When the cached value reaches into the live Dock, the side the Dock sits on is clamped to it.
+    var axVisibleFrame: CGRect {
+        var area = Self.toAX(visibleFrame)
+        guard let dock = AX.dockFrame(), dock.intersects(axFrame) else { return area }
+        if dock.width >= dock.height {
+            if area.maxY > dock.midY { area.size.height = max(0, dock.minY - area.minY) }
+        } else if dock.midX < axFrame.midX {
+            if area.minX < dock.midX { area = CGRect(x: dock.maxX, y: area.minY, width: max(0, area.maxX - dock.maxX), height: area.height) }
+        } else if area.maxX > dock.midX {
+            area.size.width = max(0, dock.minX - area.minX)
+        }
+        return area
+    }
 
     /// Displays as arranged in System Settings, left to right. The CLI numbers them in this order.
     static var leftToRight: [NSScreen] {
