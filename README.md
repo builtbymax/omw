@@ -150,10 +150,10 @@ Settings are stored in `~/.config/omw/config.json`, so you can edit them by hand
 ### Releasing
 
 ```sh
-make release VERSION=1.0.2   # universal build, Developer ID signing, notarization, Sparkle appcast
+make release VERSION=1.0.3   # universal build, Developer ID signing, notarization, Sparkle appcast
 ```
 
-The output in `build/releases/1.0.2/` (the zip and `appcast.xml`) goes onto the GitHub release `v1.0.2`.
+The output in `build/releases/1.0.3/` (the zip and `appcast.xml`) goes onto the GitHub release `v1.0.3`.
 Installed copies find it through `SUFeedURL` and update themselves with [Sparkle](https://sparkle-project.org).
 See [release-checklist.md](release-checklist.md) for the steps of a release.
 

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Builds a notarized release of omw plus the Sparkle appcast: scripts/release.sh 1.0.2
+# Builds a notarized release of omw plus the Sparkle appcast: scripts/release.sh 1.0.3
 #
 # One-time setup:
 #   1. A "Developer ID Application" certificate in the login keychain.
