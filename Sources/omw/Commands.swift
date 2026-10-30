@@ -5,6 +5,7 @@ import OMWCore
 /// read from this list.
 enum WindowCommand: String, CaseIterable, Identifiable {
     case moveLeft, moveRight, moveUp, moveDown
+    case moveLeftNoSwap, moveRightNoSwap, moveUpNoSwap, moveDownNoSwap
     case nextDisplay, previousDisplay
     case nextSpace, previousSpace
 
@@ -16,6 +17,10 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         case .moveRight: "Move Window Right"
         case .moveUp: "Move Window Up"
         case .moveDown: "Move Window Down"
+        case .moveLeftNoSwap: "Move Window Left Without Swapping"
+        case .moveRightNoSwap: "Move Window Right Without Swapping"
+        case .moveUpNoSwap: "Move Window Up Without Swapping"
+        case .moveDownNoSwap: "Move Window Down Without Swapping"
         case .nextDisplay: "Move Window to Next Display"
         case .previousDisplay: "Move Window to Previous Display"
         case .nextSpace: "Move Window to Next Workspace"
@@ -29,6 +34,10 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         case .moveRight: "Moves the focused window one column to the right and swaps it with the window there."
         case .moveUp: "Moves the focused window to the row above. In a column without rows it takes the top half, from the bottom half it goes back to full height."
         case .moveDown: "Moves the focused window to the row below. In a column without rows it takes the bottom half, from the top half it goes back to full height."
+        case .moveLeftNoSwap: "Moves the focused window one column to the left. The window there stays put and the two share the column."
+        case .moveRightNoSwap: "Moves the focused window one column to the right. The window there stays put and the two share the column."
+        case .moveUpNoSwap: "Moves the focused window to the row above, the window there stays put. In a column without rows it takes the top half, from the bottom half it goes back to full height."
+        case .moveDownNoSwap: "Moves the focused window to the row below, the window there stays put. In a column without rows it takes the bottom half, from the top half it goes back to full height."
         case .nextDisplay: "Moves the focused window to the matching column on the display to the right."
         case .previousDisplay: "Moves the focused window to the matching column on the display to the left."
         case .nextSpace: "Moves the focused window to the desktop on the right. Uses the Mission Control shortcut \u{201C}Move right a space\u{201D} (⌃→)."
@@ -40,6 +49,8 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         switch self {
         case .moveLeft, .moveRight: .move
         case .moveUp, .moveDown: .moveVertical
+        case .moveLeftNoSwap, .moveRightNoSwap: .slide
+        case .moveUpNoSwap, .moveDownNoSwap: .slideVertical
         case .nextDisplay, .previousDisplay: .display
         case .nextSpace, .previousSpace: .spaces
         }
@@ -52,6 +63,10 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         case .moveRight: "arrow.right"
         case .moveUp: "arrow.up"
         case .moveDown: "arrow.down"
+        case .moveLeftNoSwap: "arrow.left.circle"
+        case .moveRightNoSwap: "arrow.right.circle"
+        case .moveUpNoSwap: "arrow.up.circle"
+        case .moveDownNoSwap: "arrow.down.circle"
         case .nextDisplay: "arrow.right.to.line"
         case .previousDisplay: "arrow.left.to.line"
         case .nextSpace: "rectangle.righthalf.inset.filled.arrow.right"
@@ -65,6 +80,10 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         case .moveRight: \.moveRightShortcut
         case .moveUp: \.moveUpShortcut
         case .moveDown: \.moveDownShortcut
+        case .moveLeftNoSwap: \.moveLeftNoSwapShortcut
+        case .moveRightNoSwap: \.moveRightNoSwapShortcut
+        case .moveUpNoSwap: \.moveUpNoSwapShortcut
+        case .moveDownNoSwap: \.moveDownNoSwapShortcut
         case .nextDisplay: \.moveToNextDisplayShortcut
         case .previousDisplay: \.moveToPreviousDisplayShortcut
         case .nextSpace: \.moveToNextSpaceShortcut

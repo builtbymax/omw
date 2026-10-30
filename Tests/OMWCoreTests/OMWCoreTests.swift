@@ -75,6 +75,13 @@ private func window(_ app: String, at x: Double = 50) -> WindowSnapshot {
         #expect(Arranger.move(0, dx: 0, dy: 1, in: assignment, layout: focus) == nil)
     }
 
+    @Test func moveWithoutSwappingLeavesTheTargetColumnAlone() {
+        let assignment = [1, 0, 2, 0]
+        #expect(Arranger.move(0, dx: -1, dy: 0, in: assignment, layout: focus, swap: false) == [0, 0, 2, 0])
+        #expect(Arranger.move(0, dx: 1, dy: 0, in: assignment, layout: focus, swap: false) == [2, 0, 2, 0])
+        #expect(Arranger.move(1, dx: -1, dy: 0, in: assignment, layout: focus, swap: false) == nil)
+    }
+
     @Test func movingUpAndDownUsesHalvesAndReturnsToFullHeight() {
         let column = CGRect(x: 10, y: 35, width: 300, height: 780)
         let top = Arranger.verticalSlot(for: column, in: column, direction: -1, gap: 10)
@@ -224,6 +231,36 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(error("_50/_50") == .noWindows)
         #expect(error("1/1/1/1/1/1/1/1/1") == .tooManyColumns)
         #expect(error("2x20/60/_20") == nil)
+        #expect(error("1e100/1") == .tooWide("1e100"))
+        #expect(error("100001/1") == .tooWide("100001"))
+        #expect(error("100000/1") == nil)
+        #expect(error("-2x20/80") == .invalidColumn("-2x20"))
+    }
+
+    @Test func rejectsInvalidLayoutsInTheConfig() throws {
+        func decode(_ json: String) throws -> Layout {
+            try JSONDecoder().decode(Layout.self, from: Data(json.utf8))
+        }
+        #expect(try decode(#"{"name": "Wide", "ratios": [100000, 1], "rows": [0, 4]}"#).ratioLabel == "_100000/4x1")
+        #expect(throws: DecodingError.self) { try decode(#"{"name": "Huge", "ratios": [1e100, 1]}"#) }
+        #expect(throws: DecodingError.self) { try decode(#"{"name": "None", "ratios": []}"#) }
+        #expect(throws: DecodingError.self) { try decode(#"{"name": "Zero", "ratios": [0, 100]}"#) }
+        #expect(throws: DecodingError.self) { try decode(#"{"name": "Rows", "ratios": [50, 50], "rows": [5, 1]}"#) }
+        #expect(throws: DecodingError.self) { try decode(#"{"name": "Empty", "ratios": [50, 50], "rows": [0, 0]}"#) }
+        #expect(throws: DecodingError.self) { try decode(#"{"name": "Many", "ratios": [1, 1, 1, 1, 1, 1, 1, 1, 1]}"#) }
+        // A broken layout fails the whole config, which ConfigStore keeps aside as config.json.broken.
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(Config.self, from: Data(#"{"layouts": [{"name": "Huge", "ratios": [1e100]}]}"#.utf8))
+        }
+    }
+
+    @Test func labelsNeverTrap() {
+        // Layouts built in code skip validation, the labels still have to work.
+        #expect(Layout(name: "", ratios: [1e100, 1]).ratioLabel.hasSuffix("/1"))
+        #expect(Layout(name: "", ratios: [-.infinity, .nan]).ratioLabel.contains("/"))
+        #expect(Layout(name: "", ratios: [1e100, 1]).percentLabel == "100 / 0 %")
+        #expect(Layout(name: "", ratios: [33.33, 33.33, 33.33]).ratioLabel == "33/33/33")
+        #expect(Layout(name: "", ratios: [12.5, 87.5]).ratioLabel == "12.5/87.5")
     }
 
     @Test func typedColumnsKeepPins() throws {
@@ -317,6 +354,16 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         let unknownAccent = try JSONDecoder().decode(Config.self, from: Data(#"{"accent": "rainbow"}"#.utf8))
         #expect(unknownAccent.accent == .omw)
     }
+
+    @Test func boundsTheGap() throws {
+        func gap(_ value: String) throws -> Double {
+            try JSONDecoder().decode(Config.self, from: Data(#"{"gap": \#(value)}"#.utf8)).gap
+        }
+        #expect(try gap("0") == 0)
+        #expect(try gap("100") == 100)
+        #expect(throws: DecodingError.self) { try gap("-1") }
+        #expect(throws: DecodingError.self) { try gap("1e100") }
+    }
 }
 
 @Suite struct FuzzyTests {
@@ -335,6 +382,8 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(try RemoteCommand.parse(["apply", "main", "left", "--display", "2"]) == .apply(layout: "main left", display: "2"))
         #expect(try RemoteCommand.parse(["apply", "-d", "DELL", "20/60/20"]) == .apply(layout: "20/60/20", display: "DELL"))
         #expect(try RemoteCommand.parse(["move", "left"]) == .move(.left))
+        #expect(try RemoteCommand.parse(["move", "left", "--no-swap"]) == .move(.leftNoSwap))
+        #expect(try RemoteCommand.parse(["move", "--no-swap", "down"]) == .move(.downNoSwap))
         #expect(try RemoteCommand.parse(["move", "--display", "next"]) == .move(.nextDisplay))
         #expect(try RemoteCommand.parse(["move", "--space", "previous"]) == .move(.previousSpace))
         #expect(try RemoteCommand.parse(["undo"]) == .undo)
@@ -343,6 +392,16 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["move", "sideways"]) }
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["undo", "twice"]) }
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["dance"]) }
+    }
+
+    @Test func checksDisplayNumbersBeforeSubtracting() {
+        #expect(RemoteCommand.displayIndex(number: 1, count: 2) == 0)
+        #expect(RemoteCommand.displayIndex(number: 2, count: 2) == 1)
+        #expect(RemoteCommand.displayIndex(number: 3, count: 2) == nil)
+        #expect(RemoteCommand.displayIndex(number: 0, count: 2) == nil)
+        #expect(RemoteCommand.displayIndex(number: 1, count: 0) == nil)
+        #expect(RemoteCommand.displayIndex(number: .min, count: 2) == nil)
+        #expect(RemoteCommand.displayIndex(number: .max, count: 2) == nil)
     }
 
     @Test func findsLayoutsLikeTheLauncher() {
@@ -375,5 +434,104 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         }
         server.start()
         #expect(try RemoteSocket.request(.layouts, at: path) == .success("Halves"))
+    }
+}
+
+/// The socket server against clients that misbehave. Every test runs its own server on a temporary socket.
+@Suite struct RemoteServerTests {
+    private final class Server {
+        let path = NSTemporaryDirectory() + "omw-test-\(UUID().uuidString.prefix(8)).sock"
+        let server: RemoteServer
+
+        init(maxClients: Int = 4, timeout: TimeInterval = 5, delay: TimeInterval = 0) throws {
+            server = RemoteServer(listener: try RemoteSocket.listen(at: path), maxClients: maxClients, timeout: timeout) { command in
+                Thread.sleep(forTimeInterval: delay)
+                return .success("\(command)")
+            }
+            server.start()
+        }
+
+        deinit {
+            server.stop()
+            unlink(path)
+        }
+
+        /// A connection that sends whatever the test wants. Without SIGPIPE, like the CLI.
+        func connect() throws -> Int32 {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            var on: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+            var address = sockaddr_un()
+            address.sun_family = sa_family_t(AF_UNIX)
+            withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: Array(path.utf8)) }
+            let connected = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+            }
+            try #require(connected == 0)
+            return fd
+        }
+    }
+
+    private static func send(_ fd: Int32, _ text: String) {
+        _ = text.utf8CString.dropLast().withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+    }
+
+    private static func response(from fd: Int32) -> RemoteResponse? {
+        var data = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+        while case let count = read(fd, &buffer, buffer.count), count > 0 { data.append(buffer, count: count) }
+        return try? JSONDecoder().decode(RemoteResponse.self, from: data)
+    }
+
+    private static let undo = String(decoding: try! JSONEncoder().encode(RemoteCommand.undo), as: UTF8.self)
+
+    @Test func survivesClientsThatLeaveBeforeTheAnswer() throws {
+        let server = try Server(delay: 0.2)
+        let client = try server.connect()
+        Self.send(client, Self.undo)
+        shutdown(client, SHUT_WR)
+        close(client)
+        // Writing the answer to the closed connection used to kill the process with SIGPIPE.
+        Thread.sleep(forTimeInterval: 0.4)
+        #expect(try RemoteSocket.request(.layouts, at: server.path) == .success("layouts"))
+    }
+
+    @Test func slowClientsDontHoldUpOthers() throws {
+        let server = try Server(timeout: 1)
+        let slow = try server.connect()
+        defer { close(slow) }
+        let trickle = Thread {
+            for _ in 0..<10 {
+                Self.send(slow, " ")
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+        }
+        trickle.start()
+
+        let start = Date()
+        #expect(try RemoteSocket.request(.layouts, at: server.path) == .success("layouts"))
+        #expect(Date().timeIntervalSince(start) < 0.5)
+        // A byte every 0.2 s doesn't extend the deadline for the whole command.
+        #expect(Self.response(from: slow) == .failure("The command didn't arrive in time."))
+        #expect(Date().timeIntervalSince(start) < 1.8)
+    }
+
+    @Test func turnsAwayClientsOverTheLimit() throws {
+        let server = try Server(maxClients: 1, timeout: 2)
+        let idle = try server.connect()
+        defer { close(idle) }
+        Thread.sleep(forTimeInterval: 0.1)
+        #expect(try RemoteSocket.request(.layouts, at: server.path) == .failure("omw is busy with other commands, try again."))
+        shutdown(idle, SHUT_WR)
+        #expect(Self.response(from: idle) == .failure("omw didn't understand the command. Are the CLI and the app the same version?"))
+        #expect(try RemoteSocket.request(.layouts, at: server.path) == .success("layouts"))
+    }
+
+    @Test func rejectsOversizedCommands() throws {
+        let server = try Server()
+        let client = try server.connect()
+        defer { close(client) }
+        Self.send(client, String(repeating: " ", count: RemoteSocket.maxRequestSize + 1))
+        shutdown(client, SHUT_WR)
+        #expect(Self.response(from: client) == .failure("The command is too large."))
     }
 }

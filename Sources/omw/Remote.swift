@@ -7,8 +7,7 @@ final class RemoteController {
     private let store: ConfigStore
     private let manager: WindowManager
     private let overlay: OverlayController
-    private var listener: Int32 = -1
-    private var source: DispatchSourceRead?
+    private var server: RemoteServer?
 
     init(store: ConfigStore, manager: WindowManager, overlay: OverlayController) {
         self.store = store
@@ -17,32 +16,26 @@ final class RemoteController {
     }
 
     func start() {
+        let listener: Int32
         do {
             listener = try RemoteSocket.listen()
         } catch {
             NSLog("omw: CLI unavailable: \((error as? RemoteError)?.message ?? "\(error)")")
             return
         }
-        // Connections are read on a background queue, commands run on the main thread.
-        let fd = listener
-        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: DispatchQueue(label: "omw.remote"))
-        source.setEventHandler { [weak self] in
-            let client = accept(fd, nil, nil)
-            guard client >= 0 else { return }
-            RemoteSocket.serve(client) { command in
-                DispatchQueue.main.sync {
-                    MainActor.assumeIsolated { self?.handle(command) ?? .failure("omw is quitting.") }
-                }
+        // Connections are read on background queues, commands run one at a time on the main thread.
+        let server = RemoteServer(listener: listener) { [weak self] command in
+            DispatchQueue.main.sync {
+                MainActor.assumeIsolated { self?.handle(command) ?? .failure("omw is quitting.") }
             }
         }
-        source.setCancelHandler { close(fd) }
-        source.resume()
-        self.source = source
+        server.start()
+        self.server = server
     }
 
     func stop() {
-        source?.cancel()
-        source = nil
+        server?.stop()
+        server = nil
         unlink(RemoteSocket.defaultPath)
     }
 
@@ -93,7 +86,7 @@ final class RemoteController {
     /// A 1-based number from `omw displays`, or part of the display's name.
     private static func screen(matching query: String) -> NSScreen? {
         let screens = NSScreen.leftToRight
-        if let number = Int(query) { return screens.indices.contains(number - 1) ? screens[number - 1] : nil }
+        if let number = Int(query) { return RemoteCommand.displayIndex(number: number, count: screens.count).map { screens[$0] } }
         return screens.first { $0.localizedName.localizedCaseInsensitiveContains(query) }
     }
 
@@ -122,6 +115,10 @@ private extension WindowCommand {
         case .right: self = .moveRight
         case .up: self = .moveUp
         case .down: self = .moveDown
+        case .leftNoSwap: self = .moveLeftNoSwap
+        case .rightNoSwap: self = .moveRightNoSwap
+        case .upNoSwap: self = .moveUpNoSwap
+        case .downNoSwap: self = .moveDownNoSwap
         case .nextDisplay: self = .nextDisplay
         case .previousDisplay: self = .previousDisplay
         case .nextSpace: self = .nextSpace

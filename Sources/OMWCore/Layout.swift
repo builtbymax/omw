@@ -41,6 +41,10 @@ public struct Layout: Codable, Identifiable, Hashable {
         pins = try c.decodeIfPresent([String: Int].self, forKey: .pins) ?? [:]
         pinnedOnly = try c.decodeIfPresent(Bool.self, forKey: .pinnedOnly) ?? false
         shortcut = try c.decodeIfPresent(Shortcut.self, forKey: .shortcut)
+        // The same rules as typed columns, so a hand-edited config can't hold what the launcher refuses.
+        if let error = Self.check(ratios: ratios, rows: rows) {
+            throw DecodingError.dataCorruptedError(forKey: .ratios, in: c, debugDescription: "Layout \u{201C}\(name)\u{201D}: \(error.message)")
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -162,8 +166,9 @@ public struct Layout: Codable, Identifiable, Hashable {
     public var ratioLabel: String {
         let counts = rowCounts
         return ratios.enumerated().map { index, r in
+            // Formatting instead of Int(_:), which traps for values outside Int's range.
             let rounded = r.rounded()
-            let value = abs(r - rounded) < 0.5 ? String(Int(rounded)) : String(format: "%.1f", r)
+            let value = abs(r - rounded) < 0.5 ? String(format: "%.0f", rounded) : String(format: "%.1f", r)
             switch counts.indices.contains(index) ? counts[index] : 1 {
             case 0: return "_\(value)"
             case 1: return value
@@ -235,17 +240,40 @@ public struct Layout: Codable, Identifiable, Hashable {
             guard pieces.count <= 2, let value = pieces.last.flatMap({ Double($0) }), value.isFinite else {
                 return .failure(.invalidColumn(column))
             }
-            guard value > 0 else { return .failure(.zeroWidth(column)) }
             if empty && pieces.count == 2 { return .failure(.rowsInEmptyColumn(column)) }
-            guard let count = empty ? 0 : (pieces.count == 2 ? Int(pieces[0]) : 1), count >= 0 else {
+            guard let count = empty ? 0 : (pieces.count == 2 ? Int(pieces[0]) : 1) else {
                 return .failure(.invalidColumn(column))
             }
-            guard count <= maxRows else { return .failure(.tooManyRows(column)) }
+            if let error = check(ratio: value, rows: count, column: column) { return .failure(error) }
             ratios.append(value)
             rows.append(count)
         }
-        guard rows.contains(where: { $0 > 0 }) else { return .failure(.noWindows) }
+        if let error = check(ratios: ratios, rows: rows) { return .failure(error) }
         return .success((ratios, rows.contains { $0 != 1 } ? rows : []))
+    }
+
+    /// Column widths above this are rejected. Big enough for pixel widths like 640/1280/640.
+    public static let maxRatio = 100_000.0
+
+    /// What's wrong with a layout's columns, for typed columns and config.json alike.
+    /// Missing `rows` entries mean a single row, extra ones are ignored.
+    public static func check(ratios: [Double], rows: [Int]) -> ColumnSpecError? {
+        guard !ratios.isEmpty else { return .empty }
+        guard ratios.count <= maxColumns else { return .tooManyColumns }
+        let counts = ratios.indices.map { rows.indices.contains($0) ? rows[$0] : 1 }
+        for (ratio, count) in zip(ratios, counts) {
+            let column = "\(count == 0 ? "_" : count == 1 ? "" : "\(count)x")\(ratio.isFinite ? String(format: "%g", ratio) : "\(ratio)")"
+            if let error = check(ratio: ratio, rows: count, column: column) { return error }
+        }
+        return counts.contains { $0 > 0 } ? nil : .noWindows
+    }
+
+    private static func check(ratio: Double, rows: Int, column: String) -> ColumnSpecError? {
+        guard ratio.isFinite, rows >= 0 else { return .invalidColumn(column) }
+        guard ratio > 0 else { return .zeroWidth(column) }
+        guard ratio <= maxRatio else { return .tooWide(column) }
+        guard rows <= maxRows else { return .tooManyRows(column) }
+        return nil
     }
 
     /// The layout with the columns from `text`, pins following their column. Nil if the text isn't valid.
@@ -263,7 +291,7 @@ public struct Layout: Codable, Identifiable, Hashable {
               zip(percents, ratios).contains(where: { abs($0 - $1) >= 0.05 }) else { return nil }
         let values = percents.map { p in
             let rounded = (p * 10).rounded() / 10
-            return rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
+            return String(format: rounded == rounded.rounded() ? "%.0f" : "%.1f", rounded)
         }
         return values.joined(separator: " / ") + " %"
     }
@@ -285,6 +313,7 @@ public enum ColumnSpecError: Error, Equatable {
     case tooManyColumns
     case invalidColumn(String)
     case zeroWidth(String)
+    case tooWide(String)
     case tooManyRows(String)
     case rowsInEmptyColumn(String)
     case noWindows
@@ -295,6 +324,7 @@ public enum ColumnSpecError: Error, Equatable {
         case .tooManyColumns: "At most \(Layout.maxColumns) columns."
         case let .invalidColumn(column): "\u{201C}\(column)\u{201D} isn't a column. Use a width like 20, 2x20 or _20."
         case let .zeroWidth(column): "\u{201C}\(column)\u{201D} needs a width above 0."
+        case let .tooWide(column): "\u{201C}\(column)\u{201D} is too wide, use widths up to \(Int(Layout.maxRatio))."
         case let .tooManyRows(column): "\u{201C}\(column)\u{201D}: a column has at most \(Layout.maxRows) rows."
         case let .rowsInEmptyColumn(column): "\u{201C}\(column)\u{201D}: an empty column can't have rows."
         case .noWindows: "At least one column needs to take windows."

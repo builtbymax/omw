@@ -5,7 +5,7 @@ let package = Package(
     name: "omw",
     platforms: [.macOS(.v14)],
     dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.1"),
     ],
     targets: [
         .target(name: "OMWCore"),
