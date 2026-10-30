@@ -11,7 +11,15 @@ permissions:
 jobs:
   test:
     runs-on: macos-15
+    env:
+      # The glass APIs need the macOS 26 SDK; this runner defaults to Xcode 16.
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          swift --version
       - name: Build and test
         run: swift test --force-resolved-versions
