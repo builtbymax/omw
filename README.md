@@ -1,7 +1,37 @@
+<div align="center">
+
+<img src=".github/assets/icon.png" width="128" height="128" alt="omw icon">
+
 # omw — oh my windows
 
 A deliberately small window manager for macOS. Pick a column layout, and every window on the
 current desktop snaps into it. No tiling trees, no workspaces, no config language.
+
+[![Latest release](https://img.shields.io/github/v/release/builtbymax/omw?style=flat-square&label=release)](https://github.com/builtbymax/omw/releases/latest)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-000?style=flat-square&logo=apple)](#install)
+[![License: MIT](https://img.shields.io/github/license/builtbymax/omw?style=flat-square)](LICENSE)
+
+[**Download**](https://github.com/builtbymax/omw/releases/latest) · [Releases](https://github.com/builtbymax/omw/releases) · [Issues](https://github.com/builtbymax/omw/issues)
+
+<img src=".github/assets/screenshot.png" alt="The omw launcher previewing the Halves layout" width="900">
+
+</div>
+
+> [!NOTE]
+> omw is a side project I built with [Claude](https://claude.ai) for myself. It's open source
+> for anyone who wants to use it or look at how it works. Releases are signed, notarized by Apple
+> and updated regularly.
+
+## Install
+
+1. Download `omw-x.y.z.zip` from the [latest release](https://github.com/builtbymax/omw/releases/latest).
+2. Unzip it, move `omw.app` to `/Applications` and open it.
+3. Grant **Accessibility** access when macOS asks (System Settings → Privacy & Security →
+   Accessibility). omw needs it to move windows.
+4. Press `⌃⌥Space`, type `code` and press `↩`.
+
+Requires macOS 14 or later. omw lives in the menu bar, "Launch at login" is in Settings and the menu,
+and installed copies update themselves with [Sparkle](https://sparkle-project.org).
 
 ## Usage
 
@@ -93,7 +123,7 @@ omw reload                        # re-read config.json
 Exit codes: `0` done, `1` the command failed (unknown layout, no Accessibility access, no workspace in
 that direction…), `2` wrong usage, `3` omw isn't running. Errors go to stderr.
 
-## Install
+## Build it yourself
 
 Requires macOS 14+ and the Swift toolchain (Xcode or the Command Line Tools).
 
@@ -104,11 +134,11 @@ make install   # builds build/omw.app, copies it to /Applications and starts it
 On first launch macOS asks for **Accessibility** access (System Settings → Privacy & Security →
 Accessibility), which omw needs to move windows. "Launch at login" lives in Settings and the menu.
 
-The app is signed ad-hoc, so macOS asks for Accessibility access again after a rebuild (remove the old
+A local build is signed ad-hoc, so macOS asks for Accessibility access again after a rebuild (remove the old
 entry and add the new app). To avoid that, sign with a stable certificate:
 `OMW_SIGN_IDENTITY="My Cert" make install`.
 
-## Development
+### Development
 
 ```sh
 make run    # build and launch from build/
@@ -117,7 +147,7 @@ make test   # unit tests for the layout logic (Sources/OMWCore)
 
 Settings are stored in `~/.config/omw/config.json`, so you can edit them by hand. Restart omw after manual edits.
 
-## Releasing
+### Releasing
 
 ```sh
 make release VERSION=1.0.2   # universal build, Developer ID signing, notarization, Sparkle appcast
@@ -126,3 +156,7 @@ make release VERSION=1.0.2   # universal build, Developer ID signing, notarizati
 The output in `build/releases/1.0.2/` (the zip and `appcast.xml`) goes onto the GitHub release `v1.0.2`.
 Installed copies find it through `SUFeedURL` and update themselves with [Sparkle](https://sparkle-project.org).
 See [release-checklist.md](release-checklist.md) for the steps of a release.
+
+## License
+
+[MIT](LICENSE)
