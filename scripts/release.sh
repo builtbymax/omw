@@ -34,7 +34,7 @@ FEED="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' Resources/Info.plist)"
 [[ "$(git rev-parse --is-shallow-repository)" == false ]] || fail "Shallow clone: the build number (commit count) would be wrong"
 [[ -z "$(git status --porcelain)" ]] || fail "Uncommitted changes, commit or stash them first"
 [[ "$(git symbolic-ref --short HEAD 2>/dev/null)" == main ]] || fail "Not on main"
-git fetch --quiet --tags origin main
+but pull --check
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || fail "main isn't the same as origin/main, push or pull first"
 ! git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null || fail "v$VERSION is already tagged"
 PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
