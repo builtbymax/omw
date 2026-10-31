@@ -358,11 +358,13 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         config.launcherOnPrimaryDisplay = true
         config.accent = .system
         config.dragToSnap = false
+        config.stackIndicatorPosition = .left
         let decoded = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(config))
         #expect(decoded.moveLeftShortcut == nil)
         #expect(decoded.launcherOnPrimaryDisplay)
         #expect(decoded.accent == .system)
         #expect(!decoded.dragToSnap && decoded.showStackIndicator)
+        #expect(decoded.stackIndicatorPosition == .left)
         #expect(decoded.moveRightShortcut == config.moveRightShortcut)
 
         let minimal = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
@@ -370,6 +372,8 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
 
         let unknownAccent = try JSONDecoder().decode(Config.self, from: Data(#"{"accent": "rainbow"}"#.utf8))
         #expect(unknownAccent.accent == .omw)
+        let unknownPosition = try JSONDecoder().decode(Config.self, from: Data(#"{"stackIndicatorPosition": "middle"}"#.utf8))
+        #expect(unknownPosition.stackIndicatorPosition == .bottom)
     }
 
     @Test func boundsTheGap() throws {

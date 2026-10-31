@@ -22,7 +22,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .general: "Startup, permissions, spacing and the config file."
-        case .appearance: "Colors of buttons, badges and highlights."
+        case .appearance: "Colors, highlights and the stacked window dots."
         case .layouts: "Columns, shortcuts and preferred columns per layout."
         case .shortcuts: "Global shortcuts and one per layout."
         case .about: "oh my windows"
@@ -32,7 +32,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     /// Extra words the sidebar search matches.
     var keywords: String {
         switch self {
-        case .appearance: "accent color theme system blue"
+        case .appearance: "accent color theme system blue stacked windows dots position"
         case .general: "launch login startup accessibility permission gap spacing animate animation drag drop snap resize stack dots confirmation hud config file finder cli terminal command line"
         case .layouts: "columns ratio preferred pin apps"
         case .shortcuts: "hotkey keyboard open move window left right"
@@ -478,7 +478,6 @@ private extension GeneralSettings {
 /// Segmented glass control for the window gap. Values outside the presets get their own segment.
 private struct GapPicker: View {
     @Binding var gap: Double
-    @Namespace private var knob
 
     private var options: [Double] {
         let presets: [Double] = [0, 4, 8, 12, 16]
@@ -486,13 +485,25 @@ private struct GapPicker: View {
     }
 
     var body: some View {
+        SegmentPicker(selection: $gap, options: options) { String(format: "%.0f pt", $0) }
+    }
+}
+
+/// A row of capsule segments with a sliding knob behind the selected one.
+private struct SegmentPicker<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [Value]
+    let label: (Value) -> String
+    @Namespace private var knob
+
+    var body: some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { value in
-                let selected = value == gap
+                let selected = value == selection
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { gap = value }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selection = value }
                 } label: {
-                    Text(String(format: "%.0f pt", value))
+                    Text(label(value))
                         .font(.system(size: 12, weight: selected ? .semibold : .medium))
                         .fixedSize()
                         .foregroundStyle(selected ? Color.primary : .secondary)
@@ -530,6 +541,14 @@ private struct AppearanceSettings: View {
             SettingsSection(title: "Colors", footer: "Layout icons and the blueprint always stay omw blue.") {
                 SettingsRow(.appearance, "Accent color", subtitle: subtitle, divider: false) {
                     AccentPicker(accent: $store.config.accent)
+                }
+            }
+
+            SettingsSection(title: "Stacked windows") {
+                SettingsRow(.spaces, "Dots position", subtitle: "Where the dots sit in a cell with more than one window.", divider: false) {
+                    SegmentPicker(selection: $store.config.stackIndicatorPosition, options: StackIndicatorPosition.allCases) {
+                        $0.rawValue.capitalized
+                    }
                 }
             }
         }

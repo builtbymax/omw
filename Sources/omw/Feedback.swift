@@ -255,20 +255,38 @@ private final class StackModel: ObservableObject {
     /// The windows in a cell in a stable order, so the dots don't jump around when one comes to the front.
     @Published var items: [Item] = []
     @Published var frontID: CGWindowID?
+    @Published var vertical = false
     var onSelect: (CGWindowID) -> Void = { _ in }
+
+    func select(_ index: Int) {
+        guard items.indices.contains(index) else { return }
+        onSelect(items[index].id)
+    }
 
     /// The window `delta` dots away from the front one, wrapping around.
     func cycle(_ delta: Int) {
         guard !items.isEmpty else { return }
         let index = items.firstIndex { $0.id == frontID } ?? 0
-        onSelect(items[(index + delta + items.count) % items.count].id)
+        select((index + delta + items.count) % items.count)
     }
 }
 
-/// Scrolling over the dots flips through the windows of the cell.
-private final class StackHostingView: NSHostingView<StackDotsView> {
+/// Handles clicks and scrolling on the dots itself: SwiftUI gestures miss clicks now and then in a panel
+/// that never becomes key.
+private final class StackHostingView: NSHostingView<StackDotsView>, NSViewToolTipOwner {
     private var scrolled: CGFloat = 0
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        frame.contains(point) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if let index = dotIndex(at: convert(event.locationInWindow, from: nil)) { rootView.model.select(index) }
+    }
+
+    /// Scrolling flips through the windows of the cell.
     override func scrollWheel(with event: NSEvent) {
         if event.phase == .began || event.phase == .mayBegin { scrolled = 0 }
         let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) ? -event.scrollingDeltaX : event.scrollingDeltaY
@@ -276,6 +294,30 @@ private final class StackHostingView: NSHostingView<StackDotsView> {
         guard abs(scrolled) >= 24 else { return }
         rootView.model.cycle(scrolled > 0 ? -1 : 1)
         scrolled = 0
+    }
+
+    func updateToolTips() {
+        removeAllToolTips()
+        for index in rootView.model.items.indices { addToolTip(dotRect(index), owner: self, userData: nil) }
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        dotIndex(at: point).map { rootView.model.items[$0].title } ?? ""
+    }
+
+    /// The dots are centered along the pill, `dotSize` apart.
+    private func dotRect(_ index: Int) -> NSRect {
+        let size = rootView.dotSize
+        let count = CGFloat(rootView.model.items.count)
+        if rootView.model.vertical {
+            let top = (bounds.height - count * size) / 2 + CGFloat(index) * size
+            return NSRect(x: 0, y: isFlipped ? top : bounds.height - top - size, width: bounds.width, height: size)
+        }
+        return NSRect(x: (bounds.width - count * size) / 2 + CGFloat(index) * size, y: 0, width: size, height: bounds.height)
+    }
+
+    private func dotIndex(at point: NSPoint) -> Int? {
+        rootView.model.items.indices.first { dotRect($0).contains(point) }
     }
 }
 
@@ -285,7 +327,7 @@ private final class StackHostingView: NSHostingView<StackDotsView> {
 final class StackIndicatorController {
     private let store: ConfigStore
     private let manager: WindowManager
-    private var panels: [(panel: NSPanel, model: StackModel)] = []
+    private var panels: [(panel: NSPanel, view: StackHostingView, model: StackModel)] = []
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var timer: Timer?
     private var pending: DispatchWorkItem?
@@ -353,7 +395,8 @@ final class StackIndicatorController {
         }
         let stacks = manager.stacks()
         while panels.count < stacks.count { panels.append(makePanel()) }
-        for ((panel, model), stack) in zip(panels, stacks) {
+        let position = store.config.stackIndicatorPosition
+        for ((panel, view, model), stack) in zip(panels, stacks) {
             let items = stack.windows.sorted { $0.windowID < $1.windowID }.map { window in
                 StackModel.Item(id: window.windowID, title: AX.copy(window.element, kAXTitleAttribute) as? String ?? window.bundleID ?? "Window")
             }
@@ -366,24 +409,36 @@ final class StackIndicatorController {
             }
             model.items = items
             model.frontID = stack.windows.first?.windowID
-            // Bottom center of the cell, just inside it.
-            let width = CGFloat(items.count) * Self.dotSize + 16
-            let rect = CGRect(x: stack.cell.midX - width / 2, y: stack.cell.maxY - Self.height - 10, width: width, height: Self.height)
-            panel.setFrame(NSScreen.fromAX(rect).integral, display: true)
+            model.vertical = position.isVertical
+            panel.setFrame(NSScreen.fromAX(Self.frame(for: items.count, in: stack.cell, at: position)).integral, display: true)
+            view.updateToolTips()
             if !panel.isVisible { panel.orderFrontRegardless() }
         }
-        for (panel, _) in panels.dropFirst(stacks.count) { panel.orderOut(nil) }
+        for (panel, _, _) in panels.dropFirst(stacks.count) { panel.orderOut(nil) }
     }
 
-    private func makePanel() -> (NSPanel, StackModel) {
+    /// The pill centered on one edge of the cell, just inside it.
+    private static func frame(for count: Int, in cell: CGRect, at position: StackIndicatorPosition) -> CGRect {
+        let length = CGFloat(count) * dotSize + 16
+        let inset: CGFloat = 10
+        switch position {
+        case .top: return CGRect(x: cell.midX - length / 2, y: cell.minY + inset, width: length, height: height)
+        case .bottom: return CGRect(x: cell.midX - length / 2, y: cell.maxY - height - inset, width: length, height: height)
+        case .left: return CGRect(x: cell.minX + inset, y: cell.midY - length / 2, width: height, height: length)
+        case .right: return CGRect(x: cell.maxX - height - inset, y: cell.midY - length / 2, width: height, height: length)
+        }
+    }
+
+    private func makePanel() -> (NSPanel, StackHostingView, StackModel) {
         let model = StackModel()
         let panel = FeedbackPanel(clickThrough: false, allSpaces: false)
-        panel.contentView = StackHostingView(rootView: StackDotsView(model: model, dotSize: Self.dotSize))
-        return (panel, model)
+        let view = StackHostingView(rootView: StackDotsView(model: model, dotSize: Self.dotSize))
+        panel.contentView = view
+        return (panel, view, model)
     }
 
     private func hideAll() {
-        for (panel, _) in panels { panel.orderOut(nil) }
+        for (panel, _, _) in panels { panel.orderOut(nil) }
     }
 }
 
@@ -392,19 +447,17 @@ private struct StackDotsView: View {
     let dotSize: CGFloat
 
     var body: some View {
-        HStack(spacing: 0) {
+        let stack = model.vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+        // Clicks and tooltips are handled by StackHostingView.
+        stack {
             ForEach(model.items) { item in
                 let front = item.id == model.frontID
                 Circle()
                     .fill(front ? Theme.tileTop : Color.white.opacity(0.5))
                     .frame(width: front ? 8 : 6, height: front ? 8 : 6)
                     .frame(width: dotSize, height: dotSize)
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.onSelect(item.id) }
-                    .help(item.title)
             }
         }
-        .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Capsule().fill(Color(hex: 0x141824, opacity: 0.6)))
         .glassSurface(cornerRadius: 12, tint: Color(hex: 0x141824, opacity: 0.55))
