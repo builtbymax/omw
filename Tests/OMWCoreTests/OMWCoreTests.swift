@@ -359,14 +359,16 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         config.accent = .system
         config.dragToSnap = false
         config.stackIndicatorPosition = .left
-        config.columnResizeKey = .option
+        config.columnResizeKeys = [.option, .command]
+        config.dragFreeKey = .control
         let decoded = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(config))
         #expect(decoded.moveLeftShortcut == nil)
         #expect(decoded.launcherOnPrimaryDisplay)
         #expect(decoded.accent == .system)
         #expect(!decoded.dragToSnap && decoded.showStackIndicator)
         #expect(decoded.stackIndicatorPosition == .left)
-        #expect(decoded.columnResizeKey == .option && decoded.columnResize)
+        #expect(decoded.columnResizeKeys == [.option, .command] && decoded.columnResize)
+        #expect(decoded.dragFreeKey == .control)
         #expect(decoded.moveRightShortcut == config.moveRightShortcut)
 
         let minimal = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
@@ -376,6 +378,11 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(unknownAccent.accent == .omw)
         let unknownPosition = try JSONDecoder().decode(Config.self, from: Data(#"{"stackIndicatorPosition": "middle"}"#.utf8))
         #expect(unknownPosition.stackIndicatorPosition == .bottom)
+        // Keys come back in the order macOS shows them, no keys at all fall back to the default.
+        let keys = { (json: String) in try JSONDecoder().decode(Config.self, from: Data(json.utf8)).columnResizeKeys }
+        #expect(try keys(#"{"columnResizeKeys": ["command", "shift"]}"#) == [.shift, .command])
+        #expect(try keys(#"{"columnResizeKeys": []}"#) == [.control, .option])
+        #expect(try keys(#"{"columnResizeKeys": ["hyper"]}"#) == [.control, .option])
     }
 
     @Test func boundsTheGap() throws {

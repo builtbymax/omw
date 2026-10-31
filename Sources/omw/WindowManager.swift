@@ -256,8 +256,11 @@ final class WindowManager {
         let partner: (window: ManagedWindow, cell: Int)?
     }
 
-    func beginMove(_ windowID: CGWindowID, start: CGRect) -> MoveSession {
-        MoveSession(windowID: windowID, start: start)
+    /// Nil for windows that can't snap, like fixed-size settings windows.
+    func beginMove(_ windowID: CGWindowID, start: CGRect) -> MoveSession? {
+        let session = MoveSession(windowID: windowID, start: start)
+        guard let dragged = session.dragged, AX.isResizable(dragged) else { return nil }
+        return session
     }
 
     func preview(_ session: MoveSession, at point: CGPoint, swap: Bool) -> DropPreview? {
@@ -298,7 +301,7 @@ final class WindowManager {
         return true
     }
 
-    /// The columns of a display while the resize key is held. Dragging an edge between two columns moves it,
+    /// The columns of a display while the resize keys are held. Dragging an edge between two columns moves it,
     /// the windows that fill a cell follow.
     final class ResizeSession {
         let screen: NSScreen
@@ -306,8 +309,20 @@ final class WindowManager {
         let gap: Double
         /// The layout with the column widths as dragged so far.
         private(set) var layout: Layout
+        /// True when the last move stopped at the narrowest a window gets.
+        private(set) var blocked = false
         fileprivate let windows: [(window: ManagedWindow, cell: Int)]
         fileprivate var changed = false
+        /// The narrowest each column can get, learned from windows that wouldn't shrink further.
+        fileprivate var minWidths: [Int: CGFloat] = [:]
+        /// The frame each window was last sent to, so windows whose cell didn't change aren't asked again.
+        fileprivate var sent: [CGWindowID: CGRect] = [:]
+        /// The width each window reported after it was last sent somewhere.
+        fileprivate var reported: [CGWindowID: CGFloat] = [:]
+        /// Apps whose enhanced UI is off for the drag, it makes them animate and drop size changes.
+        fileprivate var enhancedApps: [AXUIElement]?
+        /// The column every cell is in.
+        fileprivate let cellColumns: [Int]
 
         fileprivate init(screen: NSScreen, layout: Layout, gap: Double, windows: [(window: ManagedWindow, cell: Int)]) {
             self.screen = screen
@@ -315,22 +330,78 @@ final class WindowManager {
             self.gap = gap
             self.layout = layout
             self.windows = windows
+            cellColumns = layout.rowCounts.enumerated().flatMap { Array(repeating: $0.offset, count: $0.element) }
         }
 
         var columns: [CGRect] { Arranger.columns(for: layout, in: area, gap: gap) }
         var cells: [CGRect] { Arranger.cells(for: layout, in: area, gap: gap) }
 
-        /// Moves the edge between column `boundary` and the next one to `x`, the middle of the gap between them.
-        /// False when the widths didn't change, they snap to 1%.
+        /// Moves the edge between column `boundary` and the next one to `x`, the middle of the gap between them,
+        /// but not so far that a window gets narrower than it can. False when the widths didn't change, they snap to 1%.
         fileprivate func move(_ boundary: Int, toX x: CGFloat) -> Bool {
-            let edge = x - CGFloat(max(0, gap)) / 2
-            let position = Arranger.boundaryPosition(forEdge: edge, boundary: boundary, layout: layout, in: area, gap: gap)
+            let columns = columns
+            guard columns.indices.contains(boundary + 1) else { return false }
+            let half = CGFloat(max(0, gap)) / 2
+            let lowest = minWidths[boundary].map { columns[boundary].minX + $0 + half } ?? -.infinity
+            let highest = minWidths[boundary + 1].map { columns[boundary + 1].maxX - $0 - half } ?? .infinity
+            let clamped = lowest <= highest ? min(max(x, lowest), highest) : x
+            blocked = clamped != x
+            var position = Arranger.boundaryPosition(forEdge: clamped - half, boundary: boundary, layout: layout, in: area, gap: gap)
             guard position.isFinite else { return false }
-            let ratios = layout.resizedRatios(movingBoundary: boundary, to: position, step: 0.01)
+            var ratios = layout.resizedRatios(movingBoundary: boundary, to: position, step: 0.01)
+            // Snapping to 1% can still cut a little into a minimum width.
+            for _ in 0..<3 {
+                var candidate = layout
+                candidate.ratios = ratios
+                let widths = Arranger.columns(for: candidate, in: area, gap: gap).map(\.width)
+                if let width = minWidths[boundary], widths[boundary] < width - 1 {
+                    position += 0.01
+                } else if let width = minWidths[boundary + 1], widths[boundary + 1] < width - 1 {
+                    position -= 0.01
+                } else {
+                    break
+                }
+                ratios = layout.resizedRatios(movingBoundary: boundary, to: position, step: 0.01)
+            }
             guard ratios != layout.fractions.map({ ($0 * 10_000).rounded() / 100 }) else { return false }
             layout.ratios = ratios
             changed = true
             return true
+        }
+
+        /// Sends every window whose cell changed there. True when a window turned out not to get as narrow
+        /// as its cell, its column then has a minimum width.
+        fileprivate func place() -> Bool {
+            if enhancedApps == nil {
+                var apps: [pid_t: AXUIElement] = [:]
+                for (window, _) in windows where AX.hasEnhancedUI(window) { apps[window.pid ?? 0] = window.app }
+                enhancedApps = Array(apps.values)
+                for app in apps.values { AX.setEnhancedUI(app, false) }
+            }
+            let cells = cells
+            var learned = false
+            for (window, cell) in windows {
+                let target = cells[cell]
+                let previous = sent[window.windowID] ?? window.frame
+                guard target != previous else { continue }
+                AX.setFrameFast(window, to: target)
+                sent[window.windowID] = target
+                guard let width = AX.frame(of: window.element)?.width else { continue }
+                // Still wider after shrinking twice in a row: not an app that is just slow, it won't go narrower.
+                if target.width < previous.width, width > target.width + 2,
+                   let last = reported[window.windowID], abs(last - width) < 1 {
+                    let column = cellColumns[cell]
+                    minWidths[column] = max(minWidths[column] ?? 0, width)
+                    learned = true
+                }
+                reported[window.windowID] = width
+            }
+            return learned
+        }
+
+        fileprivate func restoreEnhancedUI() {
+            for app in enhancedApps ?? [] { AX.setEnhancedUI(app, true) }
+            enhancedApps = nil
         }
     }
 
@@ -352,23 +423,46 @@ final class WindowManager {
     @discardableResult
     func resizeColumns(_ session: ResizeSession, boundary: Int, toX x: CGFloat) -> Bool {
         guard session.move(boundary, toX: x) else { return false }
-        let cells = session.cells
-        for (window, cell) in session.windows { AX.setFrameFast(window, to: cells[cell]) }
+        // A window that wouldn't shrink pulls the edge back to where it still fits.
+        if session.place(), session.move(boundary, toX: x) { _ = session.place() }
         return true
     }
 
     /// Keeps the new column widths on the display until a layout is applied again, and settles every window in its cell.
     func endColumnResize(_ session: ResizeSession) {
-        guard session.changed else { return }
+        guard session.changed else {
+            session.restoreEnhancedUI()
+            return
+        }
         let id = session.screen.displayID
         adjustedLayouts[id] = session.layout
         activeLayouts[id] = session.layout.id
         let cells = session.cells
-        for (window, cell) in session.windows {
-            // Their frames changed during the drag, and setFrame skips windows that already seem in place.
-            AX.setFrame(window.with(frame: AX.frame(of: window.element) ?? window.frame), to: cells[cell])
-        }
+        settle(session.windows.map { ($0.window, cells[$0.cell]) }, attempts: 3) { session.restoreEnhancedUI() }
         onWindowsMoved?()
+    }
+
+    /// Sets the frames, then checks again a moment later: apps still busy with the drag can end up
+    /// a step behind.
+    private func settle(_ moves: [(ManagedWindow, CGRect)], attempts: Int, then done: @escaping () -> Void) {
+        var pending: [(ManagedWindow, CGRect)] = []
+        for (window, target) in moves {
+            // Frames changed during the drag, and setFrame skips windows that already seem in place.
+            let current = window.with(frame: AX.frame(of: window.element) ?? window.frame)
+            let off = [current.frame.minX - target.minX, current.frame.minY - target.minY,
+                       current.frame.width - target.width, current.frame.height - target.height]
+            if off.allSatisfy({ abs($0) < 1 }) { continue }
+            AX.setFrame(current, to: target)
+            pending.append((window, target))
+        }
+        guard attempts > 1, !pending.isEmpty else {
+            done()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return done() }
+            settle(pending, attempts: attempts - 1, then: done)
+        }
     }
 
     // MARK: Stacks

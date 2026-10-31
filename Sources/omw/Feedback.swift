@@ -197,6 +197,8 @@ private final class DragPreviewModel: ObservableObject {
     /// The window that makes room, where it goes.
     @Published var partner: CGRect?
     @Published var partnerIcon: NSImage?
+    /// The key that leaves the window where it's dropped.
+    @Published var hint = ""
     @Published var visible = false
 }
 
@@ -212,7 +214,8 @@ final class DragPreviewController {
         panel.contentView = NSHostingView(rootView: DragPreviewView(model: model))
     }
 
-    func show(_ preview: WindowManager.DropPreview) {
+    func show(_ preview: WindowManager.DropPreview, hint: String) {
+        model.hint = hint
         let area = preview.screen.axVisibleFrame
         let local = { (rect: CGRect) in rect.offsetBy(dx: -area.minX, dy: -area.minY) }
         let cells = preview.cells.map(local)
@@ -279,6 +282,15 @@ private struct DragPreviewView: View {
             }
             if let rect = model.target {
                 tile(icon: model.draggedIcon, fill: Theme.tileTop.opacity(0.28), border: .white.opacity(0.9))
+                    .overlay(alignment: .bottom) {
+                        Text(model.hint)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color(hex: 0x141824, opacity: 0.7)))
+                            .padding(.bottom, 16)
+                    }
                     .frame(width: rect.width, height: rect.height)
                     .offset(x: rect.minX, y: rect.minY)
             }
