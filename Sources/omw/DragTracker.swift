@@ -11,15 +11,16 @@ final class DragTracker {
     }
 
     private final class Drag {
-        let windowID: CGWindowID
-        let start: CGRect
+        /// The windows the click may move or resize, until one of them does.
+        let candidates: [(id: CGWindowID, frame: CGRect)]
+        var windowID: CGWindowID = 0
+        var start = CGRect.zero
         var mode = Mode.pending
         var point: CGPoint
         var lastUpdate = Date.distantPast
 
-        init(windowID: CGWindowID, start: CGRect, point: CGPoint) {
-            self.windowID = windowID
-            self.start = start
+        init(candidates: [(id: CGWindowID, frame: CGRect)], point: CGPoint) {
+            self.candidates = candidates
             self.point = point
         }
     }
@@ -60,9 +61,9 @@ final class DragTracker {
         switch event.type {
         case .leftMouseDown:
             drag = nil
-            guard store.config.dragToSnap, !SpaceMover.isDragging, AX.isTrusted,
-                  let point = event.cgEvent?.location, let window = AX.windowUnder(point) else { return }
-            drag = Drag(windowID: window.id, start: window.frame, point: point)
+            guard store.config.dragToSnap, !SpaceMover.isDragging, AX.isTrusted, let point = event.cgEvent?.location else { return }
+            let candidates = AX.windowsUnder(point)
+            if !candidates.isEmpty { drag = Drag(candidates: candidates, point: point) }
         case .leftMouseDragged:
             guard let drag, let point = event.cgEvent?.location else { return }
             drag.point = point
@@ -84,21 +85,17 @@ final class DragTracker {
     private func dragged(_ drag: Drag, flags: NSEvent.ModifierFlags) {
         switch drag.mode {
         case .pending:
-            guard let frame = AX.serverFrame(of: drag.windowID) else { return }
-            let resized = abs(frame.width - drag.start.width) > Self.threshold || abs(frame.height - drag.start.height) > Self.threshold
-            let moved = abs(frame.minX - drag.start.minX) > Self.threshold || abs(frame.minY - drag.start.minY) > Self.threshold
-            if resized {
-                if let session = manager.beginResize(drag.windowID, start: drag.start, current: frame) {
-                    drag.mode = .resize(session)
-                    onDragging?(true)
-                    manager.updateResize(session, frame: frame)
-                } else {
-                    drag.mode = .ignored
-                }
-            } else if moved {
-                drag.mode = .move
-                onDragging?(true)
-                updateHighlight(drag, flags: flags)
+            // The first candidate that changed is the one being dragged.
+            for candidate in drag.candidates {
+                guard let frame = AX.serverFrame(of: candidate.id) else { continue }
+                let start = candidate.frame
+                let resized = abs(frame.width - start.width) > Self.threshold || abs(frame.height - start.height) > Self.threshold
+                let moved = abs(frame.minX - start.minX) > Self.threshold || abs(frame.minY - start.minY) > Self.threshold
+                guard resized || moved else { continue }
+                drag.windowID = candidate.id
+                drag.start = start
+                began(drag, frame: frame, resized: resized, flags: flags)
+                return
             }
         case .move:
             updateHighlight(drag, flags: flags)
@@ -106,6 +103,22 @@ final class DragTracker {
             if let frame = AX.serverFrame(of: drag.windowID) { manager.updateResize(session, frame: frame) }
         case .ignored:
             break
+        }
+    }
+
+    private func began(_ drag: Drag, frame: CGRect, resized: Bool, flags: NSEvent.ModifierFlags) {
+        if resized {
+            if let session = manager.beginResize(drag.windowID, start: drag.start, current: frame) {
+                drag.mode = .resize(session)
+                onDragging?(true)
+                manager.updateResize(session, frame: frame)
+            } else {
+                drag.mode = .ignored
+            }
+        } else {
+            drag.mode = .move
+            onDragging?(true)
+            updateHighlight(drag, flags: flags)
         }
     }
 

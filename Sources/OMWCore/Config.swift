@@ -5,6 +5,14 @@ public enum Accent: String, Codable, CaseIterable, Sendable {
     case omw, system
 }
 
+/// The edge of a cell the stacked window dots sit at.
+public enum StackIndicatorPosition: String, Codable, CaseIterable, Sendable {
+    case top, bottom, left, right
+
+    /// Left and right stack the dots vertically.
+    public var isVertical: Bool { self == .left || self == .right }
+}
+
 public struct Config: Codable, Equatable {
     public var layouts: [Layout]
     /// Space in points around and between windows, 0 to `maxGap`.
@@ -37,6 +45,7 @@ public struct Config: Codable, Equatable {
     public var dragToSnap: Bool
     /// Dots on cells with more than one window, to bring the ones behind to the front.
     public var showStackIndicator: Bool
+    public var stackIndicatorPosition: StackIndicatorPosition
     public var accent: Accent
     public var lastLayoutID: UUID?
 
@@ -63,6 +72,7 @@ public struct Config: Codable, Equatable {
         launcherOnPrimaryDisplay: Bool = false,
         dragToSnap: Bool = true,
         showStackIndicator: Bool = true,
+        stackIndicatorPosition: StackIndicatorPosition = .bottom,
         accent: Accent = .omw,
         lastLayoutID: UUID? = nil
     ) {
@@ -88,6 +98,7 @@ public struct Config: Codable, Equatable {
         self.launcherOnPrimaryDisplay = launcherOnPrimaryDisplay
         self.dragToSnap = dragToSnap
         self.showStackIndicator = showStackIndicator
+        self.stackIndicatorPosition = stackIndicatorPosition
         self.accent = accent
         self.lastLayoutID = lastLayoutID
     }
@@ -98,7 +109,7 @@ public struct Config: Codable, Equatable {
         case layouts, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
         case moveLeftNoSwapShortcut, moveRightNoSwapShortcut, moveUpNoSwapShortcut, moveDownNoSwapShortcut
         case moveToNextDisplayShortcut, moveToPreviousDisplayShortcut, moveToNextSpaceShortcut, moveToPreviousSpaceShortcut
-        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, dragToSnap, showStackIndicator
+        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, dragToSnap, showStackIndicator, stackIndicatorPosition
         case accent, lastLayoutID
     }
 
@@ -135,6 +146,7 @@ public struct Config: Codable, Equatable {
         dragToSnap = try c.decodeIfPresent(Bool.self, forKey: .dragToSnap) ?? d.dragToSnap
         showStackIndicator = try c.decodeIfPresent(Bool.self, forKey: .showStackIndicator) ?? d.showStackIndicator
         // An unknown value from a newer omw falls back instead of failing the whole config.
+        stackIndicatorPosition = (try? c.decodeIfPresent(StackIndicatorPosition.self, forKey: .stackIndicatorPosition)) ?? d.stackIndicatorPosition
         accent = (try? c.decodeIfPresent(Accent.self, forKey: .accent)) ?? d.accent
         lastLayoutID = try c.decodeIfPresent(UUID.self, forKey: .lastLayoutID)
     }
@@ -163,6 +175,7 @@ public struct Config: Codable, Equatable {
         try c.encode(launcherOnPrimaryDisplay, forKey: .launcherOnPrimaryDisplay)
         try c.encode(dragToSnap, forKey: .dragToSnap)
         try c.encode(showStackIndicator, forKey: .showStackIndicator)
+        try c.encode(stackIndicatorPosition, forKey: .stackIndicatorPosition)
         try c.encode(accent, forKey: .accent)
         try c.encodeIfPresent(lastLayoutID, forKey: .lastLayoutID)
     }

@@ -56,8 +56,9 @@ Once a layout is applied on a display, windows you drag there snap into its cell
   cell), or `⌥` to leave the window exactly where you dropped it.
 - **Resize**: drag the left or right side of a window in a column and the column follows, the windows next to it
   grow or shrink along. The new widths stay until you apply a layout again, the saved layout doesn't change.
-- **Stacked windows**: when more than one window shares a cell, a row of dots at its bottom shows how many there are
-  and which one is in front. Click a dot or scroll over the dots to bring another window to the front.
+- **Stacked windows**: when more than one window shares a cell, a row of dots shows how many there are
+  and which one is in front. Click a dot or scroll over the dots to bring another window to the front. Settings →
+  Appearance moves the dots to the top, left or right of the cell.
 
 Both can be turned off in Settings → General.
 

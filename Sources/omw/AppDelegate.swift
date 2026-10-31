@@ -64,8 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dragTracker.onDragging = { [weak self] dragging in self?.stackIndicator.setSuspended(dragging) }
         dragTracker.onMouseUp = { [weak self] in self?.stackIndicator.scheduleRefresh(after: 0.15) }
         store.$config
-            .map(\.showStackIndicator)
-            .removeDuplicates()
+            .map { ($0.showStackIndicator, $0.stackIndicatorPosition) }
+            .removeDuplicates(by: ==)
             .sink { [weak self] _ in self?.stackIndicator.scheduleRefresh(after: 0) }
             .store(in: &subscriptions)
         dragTracker.start()
