@@ -33,7 +33,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var keywords: String {
         switch self {
         case .appearance: "accent color theme system blue"
-        case .general: "launch login startup accessibility permission gap spacing animate animation confirmation hud config file finder cli terminal command line"
+        case .general: "launch login startup accessibility permission gap spacing animate animation drag drop snap resize stack dots confirmation hud config file finder cli terminal command line"
         case .layouts: "columns ratio preferred pin apps"
         case .shortcuts: "hotkey keyboard open move window left right"
         case .about: "version info"
@@ -357,6 +357,12 @@ private struct GeneralSettings: View {
                 }
                 SettingsRow(.move, "Animate windows", subtitle: "Glide windows into their columns.") {
                     Toggle("", isOn: $store.config.animate).toggleStyle(.switch).labelsHidden()
+                }
+                SettingsRow(.slide, "Drag windows into cells", subtitle: "Drop a window into the cell under the pointer, \u{21E7} without swapping, \u{2325} to leave it where it is. Dragging a window's side resizes the column.") {
+                    Toggle("", isOn: $store.config.dragToSnap).toggleStyle(.switch).labelsHidden()
+                }
+                SettingsRow(.spaces, "Show stacked windows", subtitle: "Dots on a cell with more than one window. Click or scroll them to bring a window to the front.") {
+                    Toggle("", isOn: $store.config.showStackIndicator).toggleStyle(.switch).labelsHidden()
                 }
                 SettingsRow(.undo, "Show confirmation", subtitle: "\u{201C}Arranged N windows\u{201D} with Undo after applying a layout.") {
                     Toggle("", isOn: $store.config.showHUD).toggleStyle(.switch).labelsHidden()

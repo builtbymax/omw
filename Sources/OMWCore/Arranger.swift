@@ -137,6 +137,27 @@ public enum Arranger {
         return matches(top) ? column : bottom
     }
 
+    /// Whether a window fills `cell`. Apps round frames to their own size steps (e.g. terminals), so allow some slack.
+    public static func fills(_ frame: CGRect, _ cell: CGRect) -> Bool {
+        abs(frame.minX - cell.minX) < 4 && abs(frame.minY - cell.minY) < 4
+            && abs(frame.width - cell.width) < 24 && abs(frame.height - cell.height) < 24
+    }
+
+    /// The windows filling each cell, front to back (`frames` are passed front to back).
+    /// Windows that don't fill a cell are left out.
+    public static func stacks(_ frames: [CGRect], cells: [CGRect]) -> [[Int]] {
+        cells.map { cell in frames.indices.filter { fills(frames[$0], cell) } }
+    }
+
+    /// Where the edge between column `boundary` and `boundary + 1` sits as a fraction of the layout's width
+    /// (see `Layout.resizedRatios`), when the right edge of column `boundary` is at `x`.
+    public static func boundaryPosition(forEdge x: CGFloat, boundary: Int, layout: Layout, in area: CGRect, gap: Double) -> Double {
+        let g = CGFloat(max(0, gap))
+        let usable = area.width - g * CGFloat(layout.columnCount + 1)
+        guard usable > 0 else { return 0 }
+        return Double((x - area.minX - g * CGFloat(boundary + 1)) / usable)
+    }
+
     /// Moves the window at `index` one cell over (see `Layout.neighbour`). With `swap`, the frontmost
     /// window in the target cell takes its old cell, otherwise it's layered into the target cell.
     /// Returns nil if there is no cell in that direction.

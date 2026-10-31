@@ -47,6 +47,20 @@ and installed copies update themselves with [Sparkle](https://sparkle-project.or
 
 All shortcuts can be changed in **Settings** (menu bar icon → Settings…), and every layout can get its own shortcut.
 
+### Dragging windows
+
+Once a layout is applied on a display, windows you drag there snap into its cells:
+
+- **Move**: drag a window by its title bar and a highlight shows the cell under the pointer. Drop it and it fills
+  that cell, swapping places with the window in front there. Hold `⇧` to drop without swapping (the two share the
+  cell), or `⌥` to leave the window exactly where you dropped it.
+- **Resize**: drag the left or right side of a window in a column and the column follows, the windows next to it
+  grow or shrink along. The new widths stay until you apply a layout again, the saved layout doesn't change.
+- **Stacked windows**: when more than one window shares a cell, a row of dots at its bottom shows how many there are
+  and which one is in front. Click a dot or scroll over the dots to bring another window to the front.
+
+Both can be turned off in Settings → General.
+
 In Settings → Appearance, buttons, badges and highlights can follow the macOS accent color instead of omw blue.
 Layout icons and the blueprint stay omw blue.
 

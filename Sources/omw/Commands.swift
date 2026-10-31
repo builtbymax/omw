@@ -106,6 +106,9 @@ enum SpaceMover {
         let flags: CGEventFlags
     }
 
+    /// While omw holds a window for a move, so the drag tracker leaves those mouse events alone.
+    private(set) static var isDragging = false
+
     /// Starts the move. Whether the Space really switched is only known later; then it just beeps.
     static func move(_ window: ManagedWindow, by delta: Int) -> ActionError? {
         guard hasSpace(beside: window, by: delta) != false else {
@@ -151,6 +154,7 @@ enum SpaceMover {
             forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
         ) { _ in MainActor.assumeIsolated { switched = true } }
 
+        isDragging = true
         post(.mouseMoved, at: grab)
         post(.leftMouseDown, at: grab)
         post(.leftMouseDragged, at: CGPoint(x: grab.x + 1, y: grab.y))
@@ -165,6 +169,8 @@ enum SpaceMover {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 post(.leftMouseUp, at: grab)
                 if let restore { CGWarpMouseCursorPosition(restore) }
+                // Posted events reach the tracker a little later than they're sent.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { isDragging = false }
                 // No Space change means there's no Space in that direction or the shortcut didn't fire.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                     NSWorkspace.shared.notificationCenter.removeObserver(observer)

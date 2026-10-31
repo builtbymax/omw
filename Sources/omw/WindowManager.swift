@@ -35,9 +35,13 @@ final class WindowManager {
     private let animator = FrameAnimator()
     /// Layouts applied from the launcher without saving them, so "Refresh Layout" still finds them.
     private var unsavedLayouts: [UUID: Layout] = [:]
+    /// The active layout with the column widths dragged on each display. Applying a layout again resets them.
+    private var adjustedLayouts: [CGDirectDisplayID: Layout] = [:]
 
     /// Called after a layout was applied with the number of windows that were arranged.
     var onArranged: ((Layout, Int, NSScreen) -> Void)?
+    /// Called whenever omw moved windows, so the stack dots can catch up.
+    var onWindowsMoved: (() -> Void)?
 
     init(store: ConfigStore) {
         self.store = store
@@ -58,6 +62,7 @@ final class WindowManager {
         let area = screen.axVisibleFrame
         let assignment = Arranger.assign(snapshots(windows), layout: layout, in: area, pinned: true, balanced: true)
         undoState = (windows.map { ($0, $0.frame) }, screen.displayID, activeLayouts[screen.displayID], arrangedWindows[screen.displayID])
+        adjustedLayouts[screen.displayID] = nil
         place(windows, assignment, layout: layout, area: area)
         activeLayouts[screen.displayID] = layout.id
         arrangedWindows[screen.displayID] = Set(windows.map(\.windowID))
@@ -81,7 +86,7 @@ final class WindowManager {
         let cells = Arranger.cells(for: layout, in: area, gap: store.config.gap)
         let windows = AX.visibleWindows(on: screen).filter { layout.arranges(appID: $0.bundleID) }
         let arranged = (arrangedWindows[screen.displayID] ?? [])
-            .union(windows.filter { window in cells.contains { Self.matches(window.frame, $0) } }.map(\.windowID))
+            .union(windows.filter { window in cells.contains { Arranger.fills(window.frame, $0) } }.map(\.windowID))
         let new = windows.filter { !arranged.contains($0.windowID) }
         guard !new.isEmpty else {
             NSSound.beep()
@@ -97,12 +102,6 @@ final class WindowManager {
         return .success(new.count)
     }
 
-    /// Apps round frames to their own size steps (e.g. terminals), so allow some slack.
-    private static func matches(_ frame: CGRect, _ cell: CGRect) -> Bool {
-        abs(frame.minX - cell.minX) < 4 && abs(frame.minY - cell.minY) < 4
-            && abs(frame.width - cell.width) < 24 && abs(frame.height - cell.height) < 24
-    }
-
     /// Puts the windows of the last arrange back where they were.
     @discardableResult
     func undo() -> ActionError? {
@@ -116,6 +115,7 @@ final class WindowManager {
         animator.run(moves, animated: store.config.animate)
         activeLayouts[state.displayID] = state.layoutID
         arrangedWindows[state.displayID] = state.arranged
+        onWindowsMoved?()
         return nil
     }
 
@@ -174,6 +174,7 @@ final class WindowManager {
         let column = Arranger.columns(for: layout, in: area, gap: store.config.gap)[index]
         let target = Arranger.verticalSlot(for: window.frame, in: column, direction: direction, gap: store.config.gap)
         animator.run([(window, target)], animated: store.config.animate)
+        onWindowsMoved?()
         return nil
     }
 
@@ -195,6 +196,7 @@ final class WindowManager {
         let cell = Arranger.cellIndex(at: point, layout: layout, in: to)
         // Across displays it jumps: gliding over the gap between screens looks broken.
         AX.setFrame(window, to: Arranger.cells(for: layout, in: to, gap: store.config.gap)[cell])
+        onWindowsMoved?()
         return nil
     }
 
@@ -207,6 +209,7 @@ final class WindowManager {
     private func layout(for screen: NSScreen) -> Layout {
         let layouts = store.config.layouts
         let id = activeLayouts[screen.displayID] ?? store.config.lastLayoutID
+        if let adjusted = adjustedLayouts[screen.displayID], adjusted.id == id { return adjusted }
         return layouts.first { $0.id == id } ?? id.flatMap { unsavedLayouts[$0] } ?? layouts.first ?? Layout(name: "Halves", ratios: [50, 50])
     }
 
@@ -217,6 +220,144 @@ final class WindowManager {
     private func place(_ windows: [ManagedWindow], _ assignment: [Int], layout: Layout, area: CGRect) {
         let cells = Arranger.cells(for: layout, in: area, gap: store.config.gap)
         animator.run(zip(windows, assignment).map { ($0, cells[$1]) }, animated: store.config.animate)
+        onWindowsMoved?()
+    }
+
+    // MARK: Dragging
+
+    /// Whether windows dragged on `screen` snap into its cells: once a layout was applied there, or when
+    /// the window started out in one of them (after omw restarted).
+    private func snaps(on screen: NSScreen, start: CGRect) -> Bool {
+        activeLayouts[screen.displayID] != nil
+            || Arranger.cells(for: layout(for: screen), in: screen.axVisibleFrame, gap: store.config.gap).contains { Arranger.fills(start, $0) }
+    }
+
+    /// The cell a window that started at `start` lands in when it's dropped at `point`.
+    func dropTarget(at point: CGPoint, start: CGRect) -> (screen: NSScreen, cell: CGRect)? {
+        guard let screen = NSScreen.screens.first(where: { $0.axFrame.contains(point) }), snaps(on: screen, start: start) else { return nil }
+        let layout = layout(for: screen)
+        let area = screen.axVisibleFrame
+        let cell = Arranger.cellIndex(at: point, layout: layout, in: area)
+        return (screen, Arranger.cells(for: layout, in: area, gap: store.config.gap)[cell])
+    }
+
+    /// Snaps a dragged window into the cell under `point`. With `swap`, the frontmost window in that cell
+    /// takes the cell the dragged window came from, if it came from one on the same display.
+    @discardableResult
+    func drop(_ windowID: CGWindowID, from start: CGRect, at point: CGPoint, swap: Bool) -> Bool {
+        guard AX.isTrusted, let target = dropTarget(at: point, start: start),
+              let dragged = AX.visibleWindows(on: nil).first(where: { $0.windowID == windowID }) else { return false }
+        let screen = target.screen
+        let cells = Arranger.cells(for: layout(for: screen), in: screen.axVisibleFrame, gap: store.config.gap)
+        let others = AX.visibleWindows(on: screen).filter { $0.windowID != windowID }
+        var moves = [(dragged, target.cell)]
+        if swap, let from = cells.firstIndex(where: { Arranger.fills(start, $0) }), cells[from] != target.cell,
+           let partner = others.first(where: { Arranger.fills($0.frame, target.cell) }) {
+            moves.append((partner, cells[from]))
+        }
+        animator.run(moves, animated: store.config.animate)
+        activeLayouts[screen.displayID] = layout(for: screen).id
+        arrangedWindows[screen.displayID, default: []].formUnion(moves.map(\.0.windowID))
+        onWindowsMoved?()
+        return true
+    }
+
+    /// A column edge being dragged. The windows in the columns follow while it moves.
+    final class ResizeSession {
+        fileprivate let screen: NSScreen
+        fileprivate let layout: Layout
+        fileprivate let boundary: Int
+        fileprivate let leftEdge: Bool
+        fileprivate let draggedID: CGWindowID
+        fileprivate let windows: [(window: ManagedWindow, cell: Int)]
+        fileprivate var ratios: [Double]
+
+        fileprivate init(screen: NSScreen, layout: Layout, boundary: Int, leftEdge: Bool, draggedID: CGWindowID,
+                         windows: [(window: ManagedWindow, cell: Int)]) {
+            self.screen = screen
+            self.layout = layout
+            self.boundary = boundary
+            self.leftEdge = leftEdge
+            self.draggedID = draggedID
+            self.windows = windows
+            ratios = layout.fractions.map { $0 * 100 }
+        }
+    }
+
+    /// Starts resizing columns when a window that fills a cell is resized at its left or right edge and there's
+    /// a column on that side. Nil for anything else, e.g. resizing at the top or bottom.
+    func beginResize(_ windowID: CGWindowID, start: CGRect, current: CGRect) -> ResizeSession? {
+        guard AX.isTrusted, let screen = AX.screen(containing: start) else { return nil }
+        let layout = layout(for: screen)
+        let area = screen.axVisibleFrame
+        let cells = Arranger.cells(for: layout, in: area, gap: store.config.gap)
+        guard let cell = cells.firstIndex(where: { Arranger.fills(start, $0) }) else { return nil }
+        let column = layout.cells[cell].column
+        let leftEdge = abs(current.minX - start.minX) > 1
+        guard leftEdge || abs(current.maxX - start.maxX) > 1 else { return nil }
+        let boundary = leftEdge ? column - 1 : column
+        guard boundary >= 0, boundary < layout.columnCount - 1 else { return nil }
+        let windows = AX.visibleWindows(on: screen).compactMap { window in
+            cells.firstIndex { Arranger.fills(window.frame, $0) }.map { (window, $0) }
+        }
+        return ResizeSession(screen: screen, layout: layout, boundary: boundary, leftEdge: leftEdge, draggedID: windowID, windows: windows)
+    }
+
+    /// Moves the column edge along with the dragged window's edge, the other windows follow.
+    func updateResize(_ session: ResizeSession, frame: CGRect) {
+        guard let ratios = resizedRatios(session, frame: frame), ratios != session.ratios else { return }
+        session.ratios = ratios
+        let cells = resizedCells(session)
+        for (window, cell) in session.windows where window.windowID != session.draggedID {
+            AX.setFrameFast(window, to: cells[cell])
+        }
+    }
+
+    /// Keeps the new column widths on this display and snaps every window, the dragged one too, into its cell.
+    func endResize(_ session: ResizeSession, frame: CGRect) {
+        if let ratios = resizedRatios(session, frame: frame) { session.ratios = ratios }
+        var adjusted = session.layout
+        adjusted.ratios = session.ratios
+        let id = session.screen.displayID
+        adjustedLayouts[id] = adjusted
+        activeLayouts[id] = adjusted.id
+        let cells = resizedCells(session)
+        for (window, cell) in session.windows {
+            // Their frames changed during the drag, and setFrame skips windows that already seem in place.
+            AX.setFrame(window.with(frame: AX.frame(of: window.element) ?? window.frame), to: cells[cell])
+        }
+        onWindowsMoved?()
+    }
+
+    private func resizedRatios(_ session: ResizeSession, frame: CGRect) -> [Double]? {
+        let area = session.screen.axVisibleFrame
+        let gap = store.config.gap
+        // The left edge of the column after the boundary sits one gap right of the boundary's edge.
+        let edge = session.leftEdge ? frame.minX - CGFloat(max(0, gap)) : frame.maxX
+        let position = Arranger.boundaryPosition(forEdge: edge, boundary: session.boundary, layout: session.layout, in: area, gap: gap)
+        guard position.isFinite else { return nil }
+        return session.layout.resizedRatios(movingBoundary: session.boundary, to: position, step: 0.01)
+    }
+
+    private func resizedCells(_ session: ResizeSession) -> [CGRect] {
+        var layout = session.layout
+        layout.ratios = session.ratios
+        return Arranger.cells(for: layout, in: session.screen.axVisibleFrame, gap: store.config.gap)
+    }
+
+    // MARK: Stacks
+
+    var hasActiveLayout: Bool { !activeLayouts.isEmpty }
+
+    /// Cells with more than one window in them on displays with an active layout, windows front to back.
+    func stacks() -> [(screen: NSScreen, cell: CGRect, windows: [ManagedWindow])] {
+        NSScreen.screens.filter { activeLayouts[$0.displayID] != nil }.flatMap { screen in
+            let cells = Arranger.cells(for: layout(for: screen), in: screen.axVisibleFrame, gap: store.config.gap)
+            let windows = AX.visibleWindows(on: screen)
+            return zip(cells, Arranger.stacks(windows.map(\.frame), cells: cells))
+                .filter { $0.1.count > 1 }
+                .map { (screen, $0.0, $0.1.map { windows[$0] }) }
+        }
     }
 
     private func ensureTrusted() -> Bool {

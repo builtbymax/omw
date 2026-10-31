@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var overlay = OverlayController(store: store, manager: manager) { [weak self] in self?.openSettings(layoutID: $0) }
     private lazy var hud = HUDController { [weak self] in self?.manager.undo() }
     private lazy var remote = RemoteController(store: store, manager: manager, overlay: overlay)
+    private lazy var dragTracker = DragTracker(store: store, manager: manager)
+    private lazy var stackIndicator = StackIndicatorController(store: store, manager: manager)
     private let settingsNavigation = SettingsNavigation()
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
@@ -58,6 +60,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.hud.show(layout, count: count, on: screen)
         }
 
+        manager.onWindowsMoved = { [weak self] in self?.stackIndicator.scheduleRefresh() }
+        dragTracker.onDragging = { [weak self] dragging in self?.stackIndicator.setSuspended(dragging) }
+        dragTracker.onMouseUp = { [weak self] in self?.stackIndicator.scheduleRefresh(after: 0.15) }
+        store.$config
+            .map(\.showStackIndicator)
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.stackIndicator.scheduleRefresh(after: 0) }
+            .store(in: &subscriptions)
+        dragTracker.start()
+        stackIndicator.start()
+
         if !AX.isTrusted { AX.requestTrust() }
         Updater.shared.start()
         remote.start()
@@ -65,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         remote.stop()
+        dragTracker.stop()
     }
 
     /// Opening omw again from Finder, Spotlight or a launcher shows Settings, the way back when the icon is hidden.

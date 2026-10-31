@@ -97,6 +97,21 @@ private func window(_ app: String, at x: Double = 50) -> WindowSnapshot {
         #expect(Arranger.move(0, dx: 1, dy: 0, in: [0, 1], layout: focus) == [1, 0])
         #expect(Arranger.move(1, dx: 1, dy: 0, in: [0, 1], layout: focus) == [0, 2])
     }
+
+    @Test func stacksListTheWindowsFillingEachCell() {
+        let cells = Arranger.cells(for: focus, in: screen, gap: 10)
+        let frames = [cells[1], cells[0], cells[1].insetBy(dx: 2, dy: 2), CGRect(x: 300, y: 100, width: 200, height: 200), cells[1]]
+        #expect(Arranger.stacks(frames, cells: cells) == [[1], [0, 2, 4], []])
+    }
+
+    @Test func columnEdgesMapToTheirBoundary() {
+        let columns = Arranger.columns(for: focus, in: screen, gap: 10)
+        let first = Arranger.boundaryPosition(forEdge: columns[0].maxX, boundary: 0, layout: focus, in: screen, gap: 10)
+        let second = Arranger.boundaryPosition(forEdge: columns[1].maxX, boundary: 1, layout: focus, in: screen, gap: 10)
+        #expect(abs(first - 0.2) < 0.01)
+        #expect(abs(second - 0.8) < 0.01)
+        #expect(focus.resizedRatios(movingBoundary: 0, to: first + 0.1, step: 0.01) == [30, 50, 20])
+    }
 }
 
 /// 2x20/60/2x20: cells 0 and 1 on the left, 2 in the middle, 3 and 4 on the right.
@@ -342,10 +357,12 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         config.moveLeftShortcut = nil
         config.launcherOnPrimaryDisplay = true
         config.accent = .system
+        config.dragToSnap = false
         let decoded = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(config))
         #expect(decoded.moveLeftShortcut == nil)
         #expect(decoded.launcherOnPrimaryDisplay)
         #expect(decoded.accent == .system)
+        #expect(!decoded.dragToSnap && decoded.showStackIndicator)
         #expect(decoded.moveRightShortcut == config.moveRightShortcut)
 
         let minimal = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))
