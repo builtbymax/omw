@@ -358,15 +358,21 @@ private struct GeneralSettings: View {
                 SettingsRow(.move, "Animate windows", subtitle: "Glide windows into their columns.") {
                     Toggle("", isOn: $store.config.animate).toggleStyle(.switch).labelsHidden()
                 }
-                SettingsRow(.slide, "Drag windows into cells", subtitle: "Drop a window into the cell under the pointer, \u{21E7} to share the cell instead of swapping, \u{2325} to leave it where it is.") {
-                    Toggle("", isOn: $store.config.dragToSnap).toggleStyle(.switch).labelsHidden()
+                SettingsRow(.slide, "Drag windows into cells", subtitle: dragSubtitle) {
+                    HStack(spacing: 10) {
+                        SegmentPicker(selection: $store.config.dragFreeKey, options: [.control, .option, .command]) { $0.symbol }
+                            .disabled(!store.config.dragToSnap)
+                            .opacity(store.config.dragToSnap ? 1 : 0.5)
+                            .help("The key that leaves a window where it's dropped")
+                        Toggle("", isOn: $store.config.dragToSnap).toggleStyle(.switch).labelsHidden()
+                    }
                 }
                 SettingsRow(.layouts, "Resize columns", subtitle: resizeSubtitle) {
                     HStack(spacing: 10) {
-                        SegmentPicker(selection: $store.config.columnResizeKey, options: ModifierKey.allCases) { $0.symbol }
+                        ModifierToggles(keys: $store.config.columnResizeKeys)
                             .disabled(!store.config.columnResize)
                             .opacity(store.config.columnResize ? 1 : 0.5)
-                            .help("The key to hold")
+                            .help("The keys to hold together")
                         Toggle("", isOn: $store.config.columnResize).toggleStyle(.switch).labelsHidden()
                     }
                 }
@@ -463,7 +469,11 @@ private extension GeneralSettings {
     }
 
     private var resizeSubtitle: String {
-        "Hold \(store.config.columnResizeKey.symbol) to show handles between the columns, drag one to resize them. Lasts until a layout is applied again."
+        "Hold \(store.config.columnResizeKeys.symbols) to show handles between the columns, drag one to resize them. Lasts until a layout is applied again."
+    }
+
+    private var dragSubtitle: String {
+        "Drop a window into the cell under the pointer, \u{21E7} to share the cell instead of swapping, \(store.config.dragFreeKey.symbol) to leave it where it is."
     }
 
     var menuBarSubtitle: String {
@@ -529,6 +539,49 @@ private struct SegmentPicker<Value: Hashable>: View {
                                     .overlay(Capsule().strokeBorder(Theme.rim(0.4, 0.08)))
                                     .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
                                     .matchedGeometryEffect(id: "knob", in: knob)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(.black.opacity(0.2)))
+        .overlay(Capsule().strokeBorder(.primary.opacity(0.08)))
+    }
+}
+
+/// Modifier keys to hold together, any combination but none.
+private struct ModifierToggles: View {
+    @Binding var keys: [ModifierKey]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ModifierKey.allCases, id: \.self) { key in
+                let selected = keys.contains(key)
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        if !selected {
+                            keys = ModifierKey.allCases.filter { keys.contains($0) || $0 == key }
+                        } else if keys.count > 1 {
+                            keys.removeAll { $0 == key }
+                        }
+                    }
+                } label: {
+                    Text(key.symbol)
+                        .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? Color.primary : .secondary)
+                        .frame(minWidth: 14)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background {
+                            if selected {
+                                Capsule()
+                                    .fill(LinearGradient(colors: [.primary.opacity(0.22), .primary.opacity(0.12)], startPoint: .top, endPoint: .bottom))
+                                    .overlay(Capsule().strokeBorder(Theme.rim(0.4, 0.08)))
+                                    .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                                    .transition(.opacity)
                             }
                         }
                         .contentShape(Capsule())

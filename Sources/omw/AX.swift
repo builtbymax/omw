@@ -226,6 +226,16 @@ enum AX {
         copy(window.app, "AXEnhancedUserInterface") as? Bool == true
     }
 
+    /// Fixed-size windows, like most settings windows, can't fill a cell.
+    static func isResizable(_ window: ManagedWindow) -> Bool {
+        var settable: DarwinBoolean = false
+        return AXUIElementIsAttributeSettable(window.element, kAXSizeAttribute as CFString, &settable) == .success && settable.boolValue
+    }
+
+    static func setEnhancedUI(_ app: AXUIElement, _ on: Bool) {
+        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, on ? kCFBooleanTrue : kCFBooleanFalse)
+    }
+
     /// Position and size only, for in-between animation frames.
     static func setFrameFast(_ window: ManagedWindow, to rect: CGRect) {
         var origin = rect.origin

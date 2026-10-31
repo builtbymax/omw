@@ -2,7 +2,7 @@ import AppKit
 import OMWCore
 import SwiftUI
 
-/// Holding the column resize key (⌘) for a moment shows the layout of the display under the pointer, with a
+/// Holding the column resize keys (⌃⌥) for a moment shows the layout of the display under the pointer, with a
 /// handle in every gap between two columns. Dragging a handle resizes the columns, the windows follow live.
 @MainActor
 final class ColumnResizeController {
@@ -17,14 +17,14 @@ final class ColumnResizeController {
     /// The boundary whose handle is being dragged.
     private var dragging: Int?
     private var keyHeld = false
-    /// While a window is dragged, the key belongs to that drag.
+    /// While a window is dragged, the keys belong to that drag.
     private var suppressed = false
 
     /// True while the handles are on screen.
     var onVisible: ((Bool) -> Void)?
 
-    /// Holding the key this long shows the handles, so shortcuts like ⌘C don't flash them.
-    private static let delay = 0.25
+    /// Holding the keys this long shows the handles, so shortcuts like ⌃⌥1 don't flash them.
+    private static let delay = 0.3
     private static let handleWidth: CGFloat = 24
 
     init(store: ConfigStore, manager: WindowManager) {
@@ -62,7 +62,7 @@ final class ColumnResizeController {
             cancel()
         case .flagsChanged:
             let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-            keyHeld = modifiers == store.config.columnResizeKey.flag
+            keyHeld = modifiers == store.config.columnResizeKeys.flags
             if keyHeld {
                 scheduleShow()
             } else if dragging == nil {
@@ -103,8 +103,9 @@ final class ColumnResizeController {
     private func cancel() {
         pendingShow?.cancel()
         pendingShow = nil
-        guard session != nil else { return }
-        session = nil
+        guard let session else { return }
+        if dragging != nil { manager.endColumnResize(session) }
+        self.session = nil
         dragging = nil
         guide.orderOut(nil)
         for (panel, _) in handles { panel.orderOut(nil) }
@@ -125,6 +126,7 @@ final class ColumnResizeController {
             let rect = CGRect(x: x - Self.handleWidth / 2, y: columns[index].minY, width: Self.handleWidth, height: columns[index].height)
             panel.setFrame(NSScreen.fromAX(rect), display: true)
             view.rootView.model.active = dragging == index
+            view.rootView.model.blocked = dragging == index && session.blocked
         }
     }
 
@@ -143,7 +145,8 @@ final class ColumnResizeController {
             dragging = boundary
             update(session)
         case let .moved(x):
-            if manager.resizeColumns(session, boundary: boundary, toX: x) { update(session) }
+            let blocked = session.blocked
+            if manager.resizeColumns(session, boundary: boundary, toX: x) || session.blocked != blocked { update(session) }
         case .ended:
             dragging = nil
             manager.endColumnResize(session)
@@ -161,6 +164,11 @@ extension ModifierKey {
         case .shift: .shift
         }
     }
+}
+
+extension [ModifierKey] {
+    var flags: NSEvent.ModifierFlags { reduce(into: []) { $0.insert($1.flag) } }
+    var symbols: String { map(\.symbol).joined() }
 }
 
 // MARK: - Guide
@@ -220,6 +228,8 @@ private struct ColumnGuideView: View {
 private final class ColumnHandleModel: ObservableObject {
     @Published var hovered = false
     @Published var active = false
+    /// A window on one side doesn't get any narrower.
+    @Published var blocked = false
 }
 
 /// A grip in the gap between two columns.
@@ -228,6 +238,7 @@ private struct ColumnHandle: View {
 
     var body: some View {
         let highlighted = model.hovered || model.active
+        let grip = model.blocked ? AnyShapeStyle(Color.orange) : highlighted ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Color.white.opacity(0.85))
         ZStack {
             // Nearly clear, but not fully: the window server lets clicks through fully transparent pixels.
             Color.white.opacity(0.01)
@@ -236,12 +247,13 @@ private struct ColumnHandle: View {
                 .frame(width: 2)
                 .padding(.vertical, 12)
             Capsule()
-                .fill(highlighted ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Color.white.opacity(0.85)))
+                .fill(grip)
                 .frame(width: highlighted ? 8 : 6, height: highlighted ? 72 : 52)
                 .overlay(Capsule().strokeBorder(.black.opacity(0.2)))
                 .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
         }
         .animation(.spring(response: 0.2, dampingFraction: 0.65), value: highlighted)
+        .animation(.easeOut(duration: 0.15), value: model.blocked)
     }
 }
 

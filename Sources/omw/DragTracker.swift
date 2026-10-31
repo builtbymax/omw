@@ -2,7 +2,7 @@ import AppKit
 import OMWCore
 
 /// Watches mouse drags on other apps' windows. Moving a window previews the layout with the cell it lands in and
-/// snaps it there on release: swapping with the window there, with ⇧ sharing the cell, with ⌥ not at all.
+/// snaps it there on release: swapping with the window there, with ⇧ sharing the cell, with the free key (⌥) not at all.
 @MainActor
 final class DragTracker {
     private enum Mode {
@@ -88,7 +88,10 @@ final class DragTracker {
                 // Resized, not moved.
                 drag.mode = .ignored
             } else if abs(frame.minX - drag.start.minX) > Self.threshold || abs(frame.minY - drag.start.minY) > Self.threshold {
-                let session = manager.beginMove(drag.windowID, start: drag.start)
+                guard let session = manager.beginMove(drag.windowID, start: drag.start) else {
+                    drag.mode = .ignored
+                    return
+                }
                 drag.mode = .move(session)
                 onDragging?(true)
                 updatePreview(session, at: drag.point, flags: flags)
@@ -103,7 +106,7 @@ final class DragTracker {
     private func released(_ drag: Drag, flags: NSEvent.ModifierFlags) {
         guard case let .move(session) = drag.mode else { return }
         preview.hide()
-        if !flags.contains(.option) {
+        if !flags.contains(freeKey) {
             let swap = !flags.contains(.shift)
             // Let the app finish its own end of the drag first, or it can put the window back.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
@@ -114,10 +117,12 @@ final class DragTracker {
     }
 
     private func updatePreview(_ session: WindowManager.MoveSession, at point: CGPoint, flags: NSEvent.ModifierFlags) {
-        guard !flags.contains(.option), let target = manager.preview(session, at: point, swap: !flags.contains(.shift)) else {
+        guard !flags.contains(freeKey), let target = manager.preview(session, at: point, swap: !flags.contains(.shift)) else {
             preview.hide()
             return
         }
-        preview.show(target)
+        preview.show(target, hint: "\(store.config.dragFreeKey.symbol) Place freely")
     }
+
+    private var freeKey: NSEvent.ModifierFlags { store.config.dragFreeKey.flag }
 }
