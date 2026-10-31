@@ -358,8 +358,14 @@ private struct GeneralSettings: View {
                 SettingsRow(.move, "Animate windows", subtitle: "Glide windows into their columns.") {
                     Toggle("", isOn: $store.config.animate).toggleStyle(.switch).labelsHidden()
                 }
-                SettingsRow(.slide, "Drag windows into cells", subtitle: "Drop a window into the cell under the pointer, \u{21E7} without swapping, \u{2325} to leave it where it is. Dragging a window's side resizes the column.") {
-                    Toggle("", isOn: $store.config.dragToSnap).toggleStyle(.switch).labelsHidden()
+                SettingsRow(.slide, "Drag windows into cells", subtitle: dragSubtitle) {
+                    HStack(spacing: 10) {
+                        SegmentPicker(selection: $store.config.dragModifier, options: DragModifier.allCases) { $0.symbol }
+                            .disabled(!store.config.dragToSnap)
+                            .opacity(store.config.dragToSnap ? 1 : 0.5)
+                            .help("Hold this key while dragging a window")
+                        Toggle("", isOn: $store.config.dragToSnap).toggleStyle(.switch).labelsHidden()
+                    }
                 }
                 SettingsRow(.spaces, "Show stacked windows", subtitle: "Dots on a cell with more than one window. Click or scroll them to bring a window to the front.") {
                     Toggle("", isOn: $store.config.showStackIndicator).toggleStyle(.switch).labelsHidden()
@@ -451,6 +457,11 @@ private extension GeneralSettings {
             cliError = error.localizedDescription
         }
         cliStatus = CLIInstaller.status
+    }
+
+    private var dragSubtitle: String {
+        let modifier = store.config.dragModifier
+        return "Hold \(modifier.symbol) while dragging a window to drop it into a cell, add \(modifier.noSwap.symbol) to share the cell instead of swapping. Dragging a window's side resizes its column."
     }
 
     var menuBarSubtitle: String {

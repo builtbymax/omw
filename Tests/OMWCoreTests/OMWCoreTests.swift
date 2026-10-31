@@ -359,12 +359,15 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         config.accent = .system
         config.dragToSnap = false
         config.stackIndicatorPosition = .left
+        config.dragModifier = .option
         let decoded = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(config))
         #expect(decoded.moveLeftShortcut == nil)
         #expect(decoded.launcherOnPrimaryDisplay)
         #expect(decoded.accent == .system)
         #expect(!decoded.dragToSnap && decoded.showStackIndicator)
         #expect(decoded.stackIndicatorPosition == .left)
+        #expect(decoded.dragModifier == .option && decoded.dragModifier.noSwap == .shift)
+        #expect(DragModifier.shift.noSwap == .option)
         #expect(decoded.moveRightShortcut == config.moveRightShortcut)
 
         let minimal = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))

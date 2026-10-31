@@ -15,6 +15,51 @@ struct ManagedWindow {
     func with(frame: CGRect) -> ManagedWindow {
         ManagedWindow(element: element, app: app, bundleID: bundleID, windowID: windowID, frame: frame)
     }
+
+    var pid: pid_t? {
+        var pid: pid_t = 0
+        return AXUIElementGetPid(app, &pid) == .success ? pid : nil
+    }
+}
+
+/// Private but long-stable SkyLight calls (used by AltTab, yabai) to bring one specific window to the front.
+/// Activating the app and raising the window through Accessibility isn't enough for Chromium-based apps like Dia:
+/// activation brings back their previous window. Loaded at runtime, so omw still works if they're ever gone.
+private enum SkyLight {
+    private typealias SetFrontProcess = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, CGWindowID, UInt32) -> CGError
+    private typealias PostEventRecord = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, UnsafeMutablePointer<UInt8>) -> CGError
+    private typealias ProcessForPID = @convention(c) (pid_t, UnsafeMutablePointer<ProcessSerialNumber>) -> OSStatus
+
+    private static let setFrontProcess = symbol("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
+                                                "_SLPSSetFrontProcessWithOptions", as: SetFrontProcess.self)
+    private static let postEventRecord = symbol("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
+                                                "SLPSPostEventRecordTo", as: PostEventRecord.self)
+    /// Unavailable to Swift, but still in the system.
+    private static let processForPID = symbol("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices",
+                                              "GetProcessForPID", as: ProcessForPID.self)
+
+    private static func symbol<T>(_ path: String, _ name: String, as type: T.Type) -> T? {
+        guard let handle = dlopen(path, RTLD_LAZY), let pointer = dlsym(handle, name) else { return nil }
+        return unsafeBitCast(pointer, to: type)
+    }
+
+    /// Makes `windowID` the key window of its app and the app the front one, as a click on the window would.
+    static func focus(_ windowID: CGWindowID, pid: pid_t) -> Bool {
+        guard let setFrontProcess, let postEventRecord, let processForPID else { return false }
+        var psn = ProcessSerialNumber()
+        guard processForPID(pid, &psn) == noErr, setFrontProcess(&psn, windowID, 0x200 /* user generated */) == .success else { return false }
+        // The event record that makes a window key, as the window server sends it.
+        var bytes = [UInt8](repeating: 0, count: 0xf8)
+        bytes[0x04] = 0xf8
+        bytes[0x3a] = 0x10
+        withUnsafeBytes(of: windowID) { bytes.replaceSubrange(0x3c..<0x40, with: $0) }
+        for index in 0x20..<0x30 { bytes[index] = 0xff }
+        for phase: UInt8 in [0x01, 0x02] {
+            bytes[0x08] = phase
+            _ = postEventRecord(&psn, &bytes)
+        }
+        return true
+    }
 }
 
 /// Thin wrapper around the Accessibility API. All rects use top-left origin coordinates.
@@ -160,6 +205,10 @@ enum AX {
         func raiseWindow() {
             AXUIElementSetAttributeValue(window.element, kAXMainAttribute as CFString, kCFBooleanTrue)
             AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
+        }
+        if let pid = window.pid, SkyLight.focus(window.windowID, pid: pid) {
+            raiseWindow()
+            return
         }
         raiseWindow()
         AXUIElementSetAttributeValue(window.app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)

@@ -232,32 +232,68 @@ final class WindowManager {
             || Arranger.cells(for: layout(for: screen), in: screen.axVisibleFrame, gap: store.config.gap).contains { Arranger.fills(start, $0) }
     }
 
-    /// The cell a window that started at `start` lands in when it's dropped at `point`.
-    func dropTarget(at point: CGPoint, start: CGRect) -> (screen: NSScreen, cell: CGRect)? {
-        guard let screen = NSScreen.screens.first(where: { $0.axFrame.contains(point) }), snaps(on: screen, start: start) else { return nil }
+    /// A window being moved with the drag modifier held. The windows on each display are looked up once.
+    final class MoveSession {
+        fileprivate let windowID: CGWindowID
+        fileprivate let start: CGRect
+        fileprivate lazy var dragged = AX.visibleWindows(on: nil).first { $0.windowID == windowID }
+        /// The frontmost other window in every occupied cell, per display.
+        fileprivate var occupants: [CGDirectDisplayID: [Int: ManagedWindow]] = [:]
+
+        fileprivate init(windowID: CGWindowID, start: CGRect) {
+            self.windowID = windowID
+            self.start = start
+        }
+    }
+
+    /// Where a dragged window lands: every cell of the display, the target cell, and with a swap
+    /// the window there and the cell it moves to.
+    struct DropPreview {
+        let screen: NSScreen
+        let cells: [CGRect]
+        let target: Int
+        let dragged: ManagedWindow?
+        let partner: (window: ManagedWindow, cell: Int)?
+    }
+
+    func beginMove(_ windowID: CGWindowID, start: CGRect) -> MoveSession {
+        MoveSession(windowID: windowID, start: start)
+    }
+
+    func preview(_ session: MoveSession, at point: CGPoint, swap: Bool) -> DropPreview? {
+        guard let screen = NSScreen.screens.first(where: { $0.axFrame.contains(point) }), snaps(on: screen, start: session.start) else { return nil }
         let layout = layout(for: screen)
         let area = screen.axVisibleFrame
-        let cell = Arranger.cellIndex(at: point, layout: layout, in: area)
-        return (screen, Arranger.cells(for: layout, in: area, gap: store.config.gap)[cell])
+        let cells = Arranger.cells(for: layout, in: area, gap: store.config.gap)
+        let target = Arranger.cellIndex(at: point, layout: layout, in: area)
+        let occupants = session.occupants[screen.displayID] ?? {
+            var result: [Int: ManagedWindow] = [:]
+            for window in AX.visibleWindows(on: screen) where window.windowID != session.windowID {
+                if let cell = cells.firstIndex(where: { Arranger.fills(window.frame, $0) }), result[cell] == nil { result[cell] = window }
+            }
+            session.occupants[screen.displayID] = result
+            return result
+        }()
+        var partner: (ManagedWindow, Int)?
+        if swap, let from = cells.firstIndex(where: { Arranger.fills(session.start, $0) }), from != target, let window = occupants[target] {
+            partner = (window, from)
+        }
+        return DropPreview(screen: screen, cells: cells, target: target, dragged: session.dragged, partner: partner)
     }
 
     /// Snaps a dragged window into the cell under `point`. With `swap`, the frontmost window in that cell
     /// takes the cell the dragged window came from, if it came from one on the same display.
     @discardableResult
-    func drop(_ windowID: CGWindowID, from start: CGRect, at point: CGPoint, swap: Bool) -> Bool {
-        guard AX.isTrusted, let target = dropTarget(at: point, start: start),
-              let dragged = AX.visibleWindows(on: nil).first(where: { $0.windowID == windowID }) else { return false }
-        let screen = target.screen
-        let cells = Arranger.cells(for: layout(for: screen), in: screen.axVisibleFrame, gap: store.config.gap)
-        let others = AX.visibleWindows(on: screen).filter { $0.windowID != windowID }
-        var moves = [(dragged, target.cell)]
-        if swap, let from = cells.firstIndex(where: { Arranger.fills(start, $0) }), cells[from] != target.cell,
-           let partner = others.first(where: { Arranger.fills($0.frame, target.cell) }) {
-            moves.append((partner, cells[from]))
+    func drop(_ session: MoveSession, at point: CGPoint, swap: Bool) -> Bool {
+        guard AX.isTrusted, let preview = preview(session, at: point, swap: swap),
+              let dragged = AX.visibleWindows(on: nil).first(where: { $0.windowID == session.windowID }) else { return false }
+        var moves = [(dragged, preview.cells[preview.target])]
+        if let partner = preview.partner, let frame = AX.frame(of: partner.window.element) {
+            moves.append((partner.window.with(frame: frame), preview.cells[partner.cell]))
         }
         animator.run(moves, animated: store.config.animate)
-        activeLayouts[screen.displayID] = layout(for: screen).id
-        arrangedWindows[screen.displayID, default: []].formUnion(moves.map(\.0.windowID))
+        activeLayouts[preview.screen.displayID] = layout(for: preview.screen).id
+        arrangedWindows[preview.screen.displayID, default: []].formUnion(moves.map(\.0.windowID))
         onWindowsMoved?()
         return true
     }

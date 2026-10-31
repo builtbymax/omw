@@ -1,13 +1,13 @@
 import AppKit
 import OMWCore
 
-/// Watches mouse drags on other apps' windows. Moving a window shows the cell it lands in and snaps it there
-/// on release (⇧ without swapping, ⌥ leaves it where it was dropped). Resizing a window at a column edge
-/// resizes the column, and the windows next to it follow.
+/// Watches mouse drags on other apps' windows. Moving a window with the drag modifier (⌘) held previews the
+/// layout with the cell it lands in and snaps it there on release, with ⇧ as well without swapping. Without the
+/// modifier windows move freely. Resizing a window at a column edge resizes the column, the windows next to it follow.
 @MainActor
 final class DragTracker {
     private enum Mode {
-        case pending, move, resize(WindowManager.ResizeSession), ignored
+        case pending, move(WindowManager.MoveSession), resize(WindowManager.ResizeSession), ignored
     }
 
     private final class Drag {
@@ -27,7 +27,7 @@ final class DragTracker {
 
     private let store: ConfigStore
     private let manager: WindowManager
-    private let highlight = DropHighlightController()
+    private let preview = DragPreviewController()
     private var monitor: Any?
     private var drag: Drag?
 
@@ -71,7 +71,7 @@ final class DragTracker {
             drag.lastUpdate = Date()
             dragged(drag, flags: event.modifierFlags)
         case .flagsChanged:
-            if let drag, case .move = drag.mode { updateHighlight(drag, flags: event.modifierFlags) }
+            if let drag, case let .move(session) = drag.mode { updatePreview(session, at: drag.point, flags: event.modifierFlags) }
         case .leftMouseUp:
             let finished = drag
             drag = nil
@@ -97,8 +97,8 @@ final class DragTracker {
                 began(drag, frame: frame, resized: resized, flags: flags)
                 return
             }
-        case .move:
-            updateHighlight(drag, flags: flags)
+        case let .move(session):
+            updatePreview(session, at: drag.point, flags: flags)
         case let .resize(session):
             if let frame = AX.serverFrame(of: drag.windowID) { manager.updateResize(session, frame: frame) }
         case .ignored:
@@ -116,21 +116,23 @@ final class DragTracker {
                 drag.mode = .ignored
             }
         } else {
-            drag.mode = .move
+            let session = manager.beginMove(drag.windowID, start: drag.start)
+            drag.mode = .move(session)
             onDragging?(true)
-            updateHighlight(drag, flags: flags)
+            updatePreview(session, at: drag.point, flags: flags)
         }
     }
 
     private func released(_ drag: Drag, flags: NSEvent.ModifierFlags) {
         switch drag.mode {
-        case .move:
-            highlight.hide()
-            if !flags.contains(.option) {
-                let swap = !flags.contains(.shift)
+        case let .move(session):
+            preview.hide()
+            let modifier = store.config.dragModifier
+            if flags.contains(modifier.flag) {
+                let swap = !flags.contains(modifier.noSwap.flag)
                 // Let the app finish its own end of the drag first, or it can put the window back.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                    self?.manager.drop(drag.windowID, from: drag.start, at: drag.point, swap: swap)
+                    self?.manager.drop(session, at: drag.point, swap: swap)
                 }
             }
             onDragging?(false)
@@ -145,11 +147,25 @@ final class DragTracker {
         }
     }
 
-    private func updateHighlight(_ drag: Drag, flags: NSEvent.ModifierFlags) {
-        guard !flags.contains(.option), let target = manager.dropTarget(at: drag.point, start: drag.start) else {
-            highlight.hide()
+    /// Shows the layout while the modifier is held, letting go of it hides it again.
+    private func updatePreview(_ session: WindowManager.MoveSession, at point: CGPoint, flags: NSEvent.ModifierFlags) {
+        let modifier = store.config.dragModifier
+        guard flags.contains(modifier.flag),
+              let target = manager.preview(session, at: point, swap: !flags.contains(modifier.noSwap.flag)) else {
+            preview.hide()
             return
         }
-        highlight.show(target.cell, on: target.screen, swap: !flags.contains(.shift))
+        preview.show(target)
+    }
+}
+
+extension DragModifier {
+    var flag: NSEvent.ModifierFlags {
+        switch self {
+        case .command: .command
+        case .option: .option
+        case .control: .control
+        case .shift: .shift
+        }
     }
 }

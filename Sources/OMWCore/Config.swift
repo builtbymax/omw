@@ -13,6 +13,23 @@ public enum StackIndicatorPosition: String, Codable, CaseIterable, Sendable {
     public var isVertical: Bool { self == .left || self == .right }
 }
 
+/// The key to hold while dragging a window to snap it into a cell.
+public enum DragModifier: String, Codable, CaseIterable, Sendable {
+    case command, option, control, shift
+
+    public var symbol: String {
+        switch self {
+        case .command: "⌘"
+        case .option: "⌥"
+        case .control: "⌃"
+        case .shift: "⇧"
+        }
+    }
+
+    /// Held as well, the window shares the cell instead of swapping.
+    public var noSwap: DragModifier { self == .shift ? .option : .shift }
+}
+
 public struct Config: Codable, Equatable {
     public var layouts: [Layout]
     /// Space in points around and between windows, 0 to `maxGap`.
@@ -41,8 +58,9 @@ public struct Config: Codable, Equatable {
     public var showMenuBarIcon: Bool
     /// Open the launcher panel on the primary display. Layouts still go to the focused window's display.
     public var launcherOnPrimaryDisplay: Bool
-    /// Dragging a window drops it into the cell under the pointer, dragging its edge resizes the column.
+    /// Dragging a window with `dragModifier` held drops it into the cell under the pointer, dragging its edge resizes the column.
     public var dragToSnap: Bool
+    public var dragModifier: DragModifier
     /// Dots on cells with more than one window, to bring the ones behind to the front.
     public var showStackIndicator: Bool
     public var stackIndicatorPosition: StackIndicatorPosition
@@ -71,6 +89,7 @@ public struct Config: Codable, Equatable {
         showMenuBarIcon: Bool = true,
         launcherOnPrimaryDisplay: Bool = false,
         dragToSnap: Bool = true,
+        dragModifier: DragModifier = .command,
         showStackIndicator: Bool = true,
         stackIndicatorPosition: StackIndicatorPosition = .bottom,
         accent: Accent = .omw,
@@ -97,6 +116,7 @@ public struct Config: Codable, Equatable {
         self.showMenuBarIcon = showMenuBarIcon
         self.launcherOnPrimaryDisplay = launcherOnPrimaryDisplay
         self.dragToSnap = dragToSnap
+        self.dragModifier = dragModifier
         self.showStackIndicator = showStackIndicator
         self.stackIndicatorPosition = stackIndicatorPosition
         self.accent = accent
@@ -109,7 +129,7 @@ public struct Config: Codable, Equatable {
         case layouts, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
         case moveLeftNoSwapShortcut, moveRightNoSwapShortcut, moveUpNoSwapShortcut, moveDownNoSwapShortcut
         case moveToNextDisplayShortcut, moveToPreviousDisplayShortcut, moveToNextSpaceShortcut, moveToPreviousSpaceShortcut
-        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, dragToSnap, showStackIndicator, stackIndicatorPosition
+        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, dragToSnap, dragModifier, showStackIndicator, stackIndicatorPosition
         case accent, lastLayoutID
     }
 
@@ -146,6 +166,7 @@ public struct Config: Codable, Equatable {
         dragToSnap = try c.decodeIfPresent(Bool.self, forKey: .dragToSnap) ?? d.dragToSnap
         showStackIndicator = try c.decodeIfPresent(Bool.self, forKey: .showStackIndicator) ?? d.showStackIndicator
         // An unknown value from a newer omw falls back instead of failing the whole config.
+        dragModifier = (try? c.decodeIfPresent(DragModifier.self, forKey: .dragModifier)) ?? d.dragModifier
         stackIndicatorPosition = (try? c.decodeIfPresent(StackIndicatorPosition.self, forKey: .stackIndicatorPosition)) ?? d.stackIndicatorPosition
         accent = (try? c.decodeIfPresent(Accent.self, forKey: .accent)) ?? d.accent
         lastLayoutID = try c.decodeIfPresent(UUID.self, forKey: .lastLayoutID)
@@ -174,6 +195,7 @@ public struct Config: Codable, Equatable {
         try c.encode(showMenuBarIcon, forKey: .showMenuBarIcon)
         try c.encode(launcherOnPrimaryDisplay, forKey: .launcherOnPrimaryDisplay)
         try c.encode(dragToSnap, forKey: .dragToSnap)
+        try c.encode(dragModifier, forKey: .dragModifier)
         try c.encode(showStackIndicator, forKey: .showStackIndicator)
         try c.encode(stackIndicatorPosition, forKey: .stackIndicatorPosition)
         try c.encode(accent, forKey: .accent)
