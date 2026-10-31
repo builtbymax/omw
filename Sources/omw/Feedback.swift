@@ -187,59 +187,119 @@ private struct HUDView: View {
     }
 }
 
-// MARK: - Drop target
+// MARK: - Drag preview
 
 @MainActor
-private final class DropHighlightModel: ObservableObject {
-    @Published var cell: CGRect?
-    @Published var swap = true
+private final class DragPreviewModel: ObservableObject {
+    @Published var cells: [CGRect] = []
+    @Published var target: CGRect?
+    @Published var draggedIcon: NSImage?
+    /// The window that makes room, where it goes.
+    @Published var partner: CGRect?
+    @Published var partnerIcon: NSImage?
+    @Published var visible = false
 }
 
-/// The cell a dragged window lands in, drawn on its display while the window is moved.
+/// The layout on the display while a window is dragged with the drag modifier: every cell, the one the window
+/// lands in, and the window that swaps places with it gliding to the cell the dragged window came from.
 @MainActor
-final class DropHighlightController {
+final class DragPreviewController {
     private let panel = FeedbackPanel(clickThrough: true)
-    private let model = DropHighlightModel()
+    private let model = DragPreviewModel()
+    private static let spring = Animation.spring(response: 0.3, dampingFraction: 0.8)
 
     init() {
-        panel.contentView = NSHostingView(rootView: DropHighlightView(model: model))
+        panel.contentView = NSHostingView(rootView: DragPreviewView(model: model))
     }
 
-    /// `cell` in Accessibility API coordinates.
-    func show(_ cell: CGRect, on screen: NSScreen, swap: Bool) {
-        let area = screen.axVisibleFrame
-        let local = cell.offsetBy(dx: -area.minX, dy: -area.minY)
-        if panel.frame != screen.visibleFrame || !panel.isVisible {
-            panel.setFrame(screen.visibleFrame, display: false)
-            model.cell = local
+    func show(_ preview: WindowManager.DropPreview) {
+        let area = preview.screen.axVisibleFrame
+        let local = { (rect: CGRect) in rect.offsetBy(dx: -area.minX, dy: -area.minY) }
+        let cells = preview.cells.map(local)
+        let target = cells[preview.target]
+        let partner = preview.partner.map { cells[$0.cell] }
+        if panel.frame != preview.screen.visibleFrame || !panel.isVisible {
+            panel.setFrame(preview.screen.visibleFrame, display: false)
+            model.cells = cells
+            model.target = target
+            model.partner = nil
+            model.visible = false
             panel.orderFrontRegardless()
         }
-        model.swap = swap
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { model.cell = local }
+        model.draggedIcon = preview.dragged.flatMap(Self.icon)
+        if let window = preview.partner?.window {
+            if model.partner == nil {
+                // The window there starts out in the target cell and slides over to make room.
+                model.partner = target
+                model.partnerIcon = Self.icon(window)
+            }
+        } else if model.partner != nil {
+            withAnimation(Self.spring) { model.partner = nil }
+        }
+        // A runloop later, so a partner that just appeared animates from where it was set.
+        DispatchQueue.main.async { [model] in
+            withAnimation(Self.spring) {
+                model.cells = cells
+                model.target = target
+                if let partner { model.partner = partner }
+                model.visible = true
+            }
+        }
     }
 
     func hide() {
-        model.cell = nil
+        model.visible = false
+        model.partner = nil
         panel.orderOut(nil)
+    }
+
+    private static func icon(_ window: ManagedWindow) -> NSImage? {
+        window.pid.flatMap { NSRunningApplication(processIdentifier: $0)?.icon }
     }
 }
 
-private struct DropHighlightView: View {
-    @ObservedObject var model: DropHighlightModel
+private struct DragPreviewView: View {
+    @ObservedObject var model: DragPreviewModel
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         ZStack(alignment: .topLeading) {
-            if let rect = model.cell {
-                let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-                ZStack {
-                    shape.fill(Theme.tileTop.opacity(0.18))
-                    shape.strokeBorder(.white.opacity(0.8), style: StrokeStyle(lineWidth: 2, dash: model.swap ? [] : [8, 6]))
-                }
-                .frame(width: rect.width, height: rect.height)
-                .offset(x: rect.minX, y: rect.minY)
+            ForEach(model.cells.indices, id: \.self) { index in
+                let rect = model.cells[index]
+                shape.strokeBorder(.white.opacity(0.45), style: StrokeStyle(lineWidth: 1.5, dash: [8, 6]))
+                    .background(shape.fill(Color.black.opacity(0.12)))
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+            }
+            if let rect = model.partner {
+                tile(icon: model.partnerIcon, fill: .white.opacity(0.16), border: .white.opacity(0.6))
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+                    .transition(.opacity)
+            }
+            if let rect = model.target {
+                tile(icon: model.draggedIcon, fill: Theme.tileTop.opacity(0.28), border: .white.opacity(0.9))
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .opacity(model.visible ? 1 : 0)
+        .scaleEffect(model.visible ? 1 : 0.98)
+    }
+
+    private func tile(icon: NSImage?, fill: Color, border: Color) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return ZStack {
+            shape.fill(fill)
+            shape.strokeBorder(border, lineWidth: 2)
+            if let icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 56, height: 56)
+                    .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+            }
+        }
     }
 }
 
@@ -256,6 +316,9 @@ private final class StackModel: ObservableObject {
     @Published var items: [Item] = []
     @Published var frontID: CGWindowID?
     @Published var vertical = false
+    /// The pointer is over the pill, and over which dot.
+    @Published var inside = false
+    @Published var hovered: CGWindowID?
     var onSelect: (CGWindowID) -> Void = { _ in }
 
     func select(_ index: Int) {
@@ -284,6 +347,32 @@ private final class StackHostingView: NSHostingView<StackDotsView>, NSViewToolTi
 
     override func mouseDown(with event: NSEvent) {
         if let index = dotIndex(at: convert(event.locationInWindow, from: nil)) { rootView.model.select(index) }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self { removeTrackingArea(area) }
+        // Always active: the panel never becomes key.
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved, .cursorUpdate],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hover(event) }
+    override func mouseMoved(with event: NSEvent) { hover(event) }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+
+    override func mouseExited(with event: NSEvent) {
+        rootView.model.hovered = nil
+        rootView.model.inside = false
+        NSCursor.arrow.set()
+    }
+
+    private func hover(_ event: NSEvent) {
+        NSCursor.pointingHand.set()
+        let model = rootView.model
+        let id = dotIndex(at: convert(event.locationInWindow, from: nil)).map { model.items[$0].id }
+        if model.hovered != id { model.hovered = id }
+        if !model.inside { model.inside = true }
     }
 
     /// Scrolling flips through the windows of the cell.
@@ -452,16 +541,21 @@ private struct StackDotsView: View {
         stack {
             ForEach(model.items) { item in
                 let front = item.id == model.frontID
+                let hovered = item.id == model.hovered
                 Circle()
-                    .fill(front ? Theme.tileTop : Color.white.opacity(0.5))
-                    .frame(width: front ? 8 : 6, height: front ? 8 : 6)
+                    .fill(front ? Theme.tileTop : Color.white.opacity(hovered ? 0.9 : model.inside ? 0.65 : 0.5))
+                    .frame(width: 6, height: 6)
+                    .scaleEffect(hovered ? 1.6 : front ? 1.33 : 1)
                     .frame(width: dotSize, height: dotSize)
             }
         }
+        .scaleEffect(model.inside ? 1.06 : 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Capsule().fill(Color(hex: 0x141824, opacity: 0.6)))
         .glassSurface(cornerRadius: 12, tint: Color(hex: 0x141824, opacity: 0.55))
         .animation(.spring(response: 0.25, dampingFraction: 0.7), value: model.frontID)
+        .animation(.spring(response: 0.2, dampingFraction: 0.6), value: model.hovered)
+        .animation(.spring(response: 0.2, dampingFraction: 0.6), value: model.inside)
         .environment(\.colorScheme, .dark)
     }
 }

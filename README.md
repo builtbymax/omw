@@ -51,9 +51,10 @@ All shortcuts can be changed in **Settings** (menu bar icon → Settings…), an
 
 Once a layout is applied on a display, windows you drag there snap into its cells:
 
-- **Move**: drag a window by its title bar and a highlight shows the cell under the pointer. Drop it and it fills
-  that cell, swapping places with the window in front there. Hold `⇧` to drop without swapping (the two share the
-  cell), or `⌥` to leave the window exactly where you dropped it.
+- **Move**: hold `⌘` while you drag a window by its title bar. The layout shows up on the display with the cell
+  under the pointer highlighted, and the window there sliding over to the cell yours came from. Drop it and the two
+  swap places. Add `⇧` to drop without swapping (the two share the cell). Without `⌘`, or after letting go of it,
+  windows move freely. The key can be changed in Settings → General.
 - **Resize**: drag the left or right side of a window in a column and the column follows, the windows next to it
   grow or shrink along. The new widths stay until you apply a layout again, the saved layout doesn't change.
 - **Stacked windows**: when more than one window shares a cell, a row of dots shows how many there are
