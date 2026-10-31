@@ -1,26 +1,24 @@
 import AppKit
 import OMWCore
 
-/// Watches mouse drags on other apps' windows. Moving a window with the drag modifier (⌘) held previews the
-/// layout with the cell it lands in and snaps it there on release, with ⇧ as well without swapping. Without the
-/// modifier windows move freely. Resizing a window at a column edge resizes the column, the windows next to it follow.
+/// Watches mouse drags on other apps' windows. Moving a window previews the layout with the cell it lands in and
+/// snaps it there on release: swapping with the window there, with ⇧ sharing the cell, with ⌥ not at all.
 @MainActor
 final class DragTracker {
     private enum Mode {
-        case pending, move(WindowManager.MoveSession), resize(WindowManager.ResizeSession), ignored
+        case pending, move(WindowManager.MoveSession), ignored
     }
 
     private final class Drag {
-        /// The windows the click may move or resize, until one of them does.
-        let candidates: [(id: CGWindowID, frame: CGRect)]
-        var windowID: CGWindowID = 0
-        var start = CGRect.zero
+        let windowID: CGWindowID
+        let start: CGRect
         var mode = Mode.pending
         var point: CGPoint
         var lastUpdate = Date.distantPast
 
-        init(candidates: [(id: CGWindowID, frame: CGRect)], point: CGPoint) {
-            self.candidates = candidates
+        init(windowID: CGWindowID, start: CGRect, point: CGPoint) {
+            self.windowID = windowID
+            self.start = start
             self.point = point
         }
     }
@@ -31,7 +29,7 @@ final class DragTracker {
     private var monitor: Any?
     private var drag: Drag?
 
-    /// True while a window is being moved or a column resized, false when it's over.
+    /// True while a window is being moved, false when it's over.
     var onDragging: ((Bool) -> Void)?
     /// After every click, a window may have come to the front.
     var onMouseUp: (() -> Void)?
@@ -61,9 +59,9 @@ final class DragTracker {
         switch event.type {
         case .leftMouseDown:
             drag = nil
-            guard store.config.dragToSnap, !SpaceMover.isDragging, AX.isTrusted, let point = event.cgEvent?.location else { return }
-            let candidates = AX.windowsUnder(point)
-            if !candidates.isEmpty { drag = Drag(candidates: candidates, point: point) }
+            guard store.config.dragToSnap, !SpaceMover.isDragging, AX.isTrusted,
+                  let point = event.cgEvent?.location, let window = AX.windowUnder(point) else { return }
+            drag = Drag(windowID: window.id, start: window.frame, point: point)
         case .leftMouseDragged:
             guard let drag, let point = event.cgEvent?.location else { return }
             drag.point = point
@@ -85,87 +83,41 @@ final class DragTracker {
     private func dragged(_ drag: Drag, flags: NSEvent.ModifierFlags) {
         switch drag.mode {
         case .pending:
-            // The first candidate that changed is the one being dragged.
-            for candidate in drag.candidates {
-                guard let frame = AX.serverFrame(of: candidate.id) else { continue }
-                let start = candidate.frame
-                let resized = abs(frame.width - start.width) > Self.threshold || abs(frame.height - start.height) > Self.threshold
-                let moved = abs(frame.minX - start.minX) > Self.threshold || abs(frame.minY - start.minY) > Self.threshold
-                guard resized || moved else { continue }
-                drag.windowID = candidate.id
-                drag.start = start
-                began(drag, frame: frame, resized: resized, flags: flags)
-                return
+            guard let frame = AX.serverFrame(of: drag.windowID) else { return }
+            if abs(frame.width - drag.start.width) > Self.threshold || abs(frame.height - drag.start.height) > Self.threshold {
+                // Resized, not moved.
+                drag.mode = .ignored
+            } else if abs(frame.minX - drag.start.minX) > Self.threshold || abs(frame.minY - drag.start.minY) > Self.threshold {
+                let session = manager.beginMove(drag.windowID, start: drag.start)
+                drag.mode = .move(session)
+                onDragging?(true)
+                updatePreview(session, at: drag.point, flags: flags)
             }
         case let .move(session):
             updatePreview(session, at: drag.point, flags: flags)
-        case let .resize(session):
-            if let frame = AX.serverFrame(of: drag.windowID) { manager.updateResize(session, frame: frame) }
         case .ignored:
             break
         }
     }
 
-    private func began(_ drag: Drag, frame: CGRect, resized: Bool, flags: NSEvent.ModifierFlags) {
-        if resized {
-            if let session = manager.beginResize(drag.windowID, start: drag.start, current: frame) {
-                drag.mode = .resize(session)
-                onDragging?(true)
-                manager.updateResize(session, frame: frame)
-            } else {
-                drag.mode = .ignored
-            }
-        } else {
-            let session = manager.beginMove(drag.windowID, start: drag.start)
-            drag.mode = .move(session)
-            onDragging?(true)
-            updatePreview(session, at: drag.point, flags: flags)
-        }
-    }
-
     private func released(_ drag: Drag, flags: NSEvent.ModifierFlags) {
-        switch drag.mode {
-        case let .move(session):
-            preview.hide()
-            let modifier = store.config.dragModifier
-            if flags.contains(modifier.flag) {
-                let swap = !flags.contains(modifier.noSwap.flag)
-                // Let the app finish its own end of the drag first, or it can put the window back.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                    self?.manager.drop(session, at: drag.point, swap: swap)
-                }
-            }
-            onDragging?(false)
-        case let .resize(session):
+        guard case let .move(session) = drag.mode else { return }
+        preview.hide()
+        if !flags.contains(.option) {
+            let swap = !flags.contains(.shift)
+            // Let the app finish its own end of the drag first, or it can put the window back.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                let frame = AX.serverFrame(of: drag.windowID) ?? drag.start
-                self?.manager.endResize(session, frame: frame)
+                self?.manager.drop(session, at: drag.point, swap: swap)
             }
-            onDragging?(false)
-        case .pending, .ignored:
-            break
         }
+        onDragging?(false)
     }
 
-    /// Shows the layout while the modifier is held, letting go of it hides it again.
     private func updatePreview(_ session: WindowManager.MoveSession, at point: CGPoint, flags: NSEvent.ModifierFlags) {
-        let modifier = store.config.dragModifier
-        guard flags.contains(modifier.flag),
-              let target = manager.preview(session, at: point, swap: !flags.contains(modifier.noSwap.flag)) else {
+        guard !flags.contains(.option), let target = manager.preview(session, at: point, swap: !flags.contains(.shift)) else {
             preview.hide()
             return
         }
         preview.show(target)
-    }
-}
-
-extension DragModifier {
-    var flag: NSEvent.ModifierFlags {
-        switch self {
-        case .command: .command
-        case .option: .option
-        case .control: .control
-        case .shift: .shift
-        }
     }
 }
