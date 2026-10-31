@@ -86,8 +86,8 @@ enum AX {
         return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
     }
 
-    /// Normal windows on the current desktop (Space) whose center is on `screen`, frontmost first.
-    static func visibleWindows(on screen: NSScreen) -> [ManagedWindow] {
+    /// Normal windows on the current desktop (Space) whose center is on `screen` (any display for nil), frontmost first.
+    static func visibleWindows(on screen: NSScreen?) -> [ManagedWindow] {
         let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         var zOrder: [CGWindowID: Int] = [:]
         var pids = Set<pid_t>()
@@ -101,7 +101,7 @@ enum AX {
         }
 
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        let screenFrame = screen.axFrame
+        let screenFrame = screen?.axFrame
         var result: [ManagedWindow] = []
 
         for app in NSWorkspace.shared.runningApplications
@@ -114,12 +114,46 @@ enum AX {
                       copy(window, kAXMinimizedAttribute) as? Bool != true,
                       copy(window, "AXFullScreen") as? Bool != true,
                       let frame = frame(of: window),
-                      screenFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { continue }
+                      screenFrame?.contains(CGPoint(x: frame.midX, y: frame.midY)) ?? true else { continue }
                 result.append(ManagedWindow(element: window, app: axApp, bundleID: app.bundleIdentifier, windowID: id, frame: frame))
             }
         }
 
         return result.sorted { zOrder[$0.windowID]! < zOrder[$1.windowID]! }
+    }
+
+    /// The frontmost normal window of another app under `point`, from the window server. Cheap enough for every click.
+    static func windowUnder(_ point: CGPoint) -> (id: CGWindowID, frame: CGRect)? {
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let ownPID = Int(ProcessInfo.processInfo.processIdentifier)
+        for window in info {
+            guard let frame = bounds(of: window), frame.contains(point) else { continue }
+            if let alpha = window[kCGWindowAlpha as String] as? Double, alpha <= 0 { continue }
+            // omw's own panels (the stack dots) catch the click themselves.
+            if window[kCGWindowOwnerPID as String] as? Int == ownPID { return nil }
+            // Menus, the Dock and other apps' overlays, often click-through, don't move with a drag.
+            guard window[kCGWindowLayer as String] as? Int == 0 else { continue }
+            guard let number = window[kCGWindowNumber as String] as? Int else { return nil }
+            return (CGWindowID(number), frame)
+        }
+        return nil
+    }
+
+    /// A window's frame from the window server, without asking its app.
+    static func serverFrame(of id: CGWindowID) -> CGRect? {
+        (CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]])?.first.flatMap(bounds(of:))
+    }
+
+    private static func bounds(of info: [String: Any]) -> CGRect? {
+        guard let dictionary = info[kCGWindowBounds as String] as? NSDictionary else { return nil }
+        return CGRect(dictionaryRepresentation: dictionary)
+    }
+
+    /// Brings a window and its app to the front.
+    static func raise(_ window: ManagedWindow) {
+        AXUIElementSetAttributeValue(window.app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(window.element, kAXMainAttribute as CFString, kCFBooleanTrue)
+        AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
     }
 
     /// The Dock's icon strip as it is on screen right now, or nil when it hides itself.
@@ -197,6 +231,9 @@ extension NSScreen {
     static var leftToRight: [NSScreen] {
         screens.sorted { ($0.frame.minX, $0.frame.minY) < ($1.frame.minX, $1.frame.minY) }
     }
+
+    /// An Accessibility API rect in AppKit's bottom-left origin coordinates. Flipping is its own inverse.
+    static func fromAX(_ rect: CGRect) -> NSRect { toAX(rect) }
 
     private static func toAX(_ rect: NSRect) -> CGRect {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? rect.maxY
