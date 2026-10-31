@@ -3,7 +3,7 @@ import OMWCore
 import SwiftUI
 
 /// Click-through, transparent panel that covers a display.
-private final class FeedbackPanel: NSPanel {
+final class FeedbackPanel: NSPanel {
     /// Panels that belong to the windows of one desktop pass false for `allSpaces`, so they stay on it.
     init(clickThrough: Bool, allSpaces: Bool = true) {
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)

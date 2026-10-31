@@ -167,26 +167,21 @@ enum AX {
         return result.sorted { zOrder[$0.windowID]! < zOrder[$1.windowID]! }
     }
 
-    /// Normal windows of other apps a click at `point` may move or resize, frontmost first, from the window server.
-    /// Cheap enough for every click. macOS lets you grab a window's edge a few points outside of it, so windows
-    /// within `slop` count too, down to the first one the point is really inside of.
-    static func windowsUnder(_ point: CGPoint, slop: CGFloat = 8) -> [(id: CGWindowID, frame: CGRect)] {
+    /// The frontmost normal window of another app under `point`, from the window server. Cheap enough for every click.
+    static func windowUnder(_ point: CGPoint) -> (id: CGWindowID, frame: CGRect)? {
         let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         let ownPID = Int(ProcessInfo.processInfo.processIdentifier)
-        var result: [(id: CGWindowID, frame: CGRect)] = []
         for window in info {
-            guard let frame = bounds(of: window), frame.insetBy(dx: -slop, dy: -slop).contains(point) else { continue }
+            guard let frame = bounds(of: window), frame.contains(point) else { continue }
             if let alpha = window[kCGWindowAlpha as String] as? Double, alpha <= 0 { continue }
-            let inside = frame.contains(point)
-            // omw's own panels (the stack dots) catch the click themselves.
-            if inside, window[kCGWindowOwnerPID as String] as? Int == ownPID { return result }
+            // omw's own panels (the stack dots, the column handles) catch the click themselves.
+            if window[kCGWindowOwnerPID as String] as? Int == ownPID { return nil }
             // Menus, the Dock and other apps' overlays, often click-through, don't move with a drag.
-            guard window[kCGWindowLayer as String] as? Int == 0, window[kCGWindowOwnerPID as String] as? Int != ownPID,
-                  let number = window[kCGWindowNumber as String] as? Int else { continue }
-            result.append((CGWindowID(number), frame))
-            if inside { break }
+            guard window[kCGWindowLayer as String] as? Int == 0 else { continue }
+            guard let number = window[kCGWindowNumber as String] as? Int else { return nil }
+            return (CGWindowID(number), frame)
         }
-        return result
+        return nil
     }
 
     /// A window's frame from the window server, without asking its app.

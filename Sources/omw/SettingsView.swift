@@ -33,7 +33,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var keywords: String {
         switch self {
         case .appearance: "accent color theme system blue stacked windows dots position"
-        case .general: "launch login startup accessibility permission gap spacing animate animation drag drop snap resize stack dots confirmation hud config file finder cli terminal command line"
+        case .general: "launch login startup accessibility permission gap spacing animate animation drag drop snap resize columns handles width stack dots confirmation hud config file finder cli terminal command line"
         case .layouts: "columns ratio preferred pin apps"
         case .shortcuts: "hotkey keyboard open move window left right"
         case .about: "version info"
@@ -358,13 +358,16 @@ private struct GeneralSettings: View {
                 SettingsRow(.move, "Animate windows", subtitle: "Glide windows into their columns.") {
                     Toggle("", isOn: $store.config.animate).toggleStyle(.switch).labelsHidden()
                 }
-                SettingsRow(.slide, "Drag windows into cells", subtitle: dragSubtitle) {
+                SettingsRow(.slide, "Drag windows into cells", subtitle: "Drop a window into the cell under the pointer, \u{21E7} to share the cell instead of swapping, \u{2325} to leave it where it is.") {
+                    Toggle("", isOn: $store.config.dragToSnap).toggleStyle(.switch).labelsHidden()
+                }
+                SettingsRow(.layouts, "Resize columns", subtitle: resizeSubtitle) {
                     HStack(spacing: 10) {
-                        SegmentPicker(selection: $store.config.dragModifier, options: DragModifier.allCases) { $0.symbol }
-                            .disabled(!store.config.dragToSnap)
-                            .opacity(store.config.dragToSnap ? 1 : 0.5)
-                            .help("Hold this key while dragging a window")
-                        Toggle("", isOn: $store.config.dragToSnap).toggleStyle(.switch).labelsHidden()
+                        SegmentPicker(selection: $store.config.columnResizeKey, options: ModifierKey.allCases) { $0.symbol }
+                            .disabled(!store.config.columnResize)
+                            .opacity(store.config.columnResize ? 1 : 0.5)
+                            .help("The key to hold")
+                        Toggle("", isOn: $store.config.columnResize).toggleStyle(.switch).labelsHidden()
                     }
                 }
                 SettingsRow(.spaces, "Show stacked windows", subtitle: "Dots on a cell with more than one window. Click or scroll them to bring a window to the front.") {
@@ -459,9 +462,8 @@ private extension GeneralSettings {
         cliStatus = CLIInstaller.status
     }
 
-    private var dragSubtitle: String {
-        let modifier = store.config.dragModifier
-        return "Hold \(modifier.symbol) while dragging a window to drop it into a cell, add \(modifier.noSwap.symbol) to share the cell instead of swapping. Dragging a window's side resizes its column."
+    private var resizeSubtitle: String {
+        "Hold \(store.config.columnResizeKey.symbol) to show handles between the columns, drag one to resize them. Lasts until a layout is applied again."
     }
 
     var menuBarSubtitle: String {

@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var remote = RemoteController(store: store, manager: manager, overlay: overlay)
     private lazy var dragTracker = DragTracker(store: store, manager: manager)
     private lazy var stackIndicator = StackIndicatorController(store: store, manager: manager)
+    private lazy var columnResize = ColumnResizeController(store: store, manager: manager)
+    /// The stack dots step aside while a window is dragged or columns are resized.
+    private var draggingWindow = false, resizingColumns = false
     private let settingsNavigation = SettingsNavigation()
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
@@ -61,7 +64,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         manager.onWindowsMoved = { [weak self] in self?.stackIndicator.scheduleRefresh() }
-        dragTracker.onDragging = { [weak self] dragging in self?.stackIndicator.setSuspended(dragging) }
+        dragTracker.onDragging = { [weak self] dragging in
+            guard let self else { return }
+            self.draggingWindow = dragging
+            self.columnResize.setSuppressed(dragging)
+            self.stackIndicator.setSuspended(self.draggingWindow || self.resizingColumns)
+        }
+        columnResize.onVisible = { [weak self] visible in
+            guard let self else { return }
+            self.resizingColumns = visible
+            self.stackIndicator.setSuspended(self.draggingWindow || self.resizingColumns)
+        }
         dragTracker.onMouseUp = { [weak self] in self?.stackIndicator.scheduleRefresh(after: 0.15) }
         store.$config
             .map { ($0.showStackIndicator, $0.stackIndicatorPosition) }
@@ -70,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .store(in: &subscriptions)
         dragTracker.start()
         stackIndicator.start()
+        columnResize.start()
 
         if !AX.isTrusted { AX.requestTrust() }
         Updater.shared.start()
@@ -79,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         remote.stop()
         dragTracker.stop()
+        columnResize.stop()
     }
 
     /// Opening omw again from Finder, Spotlight or a launcher shows Settings, the way back when the icon is hidden.

@@ -298,87 +298,77 @@ final class WindowManager {
         return true
     }
 
-    /// A column edge being dragged. The windows in the columns follow while it moves.
+    /// The columns of a display while the resize key is held. Dragging an edge between two columns moves it,
+    /// the windows that fill a cell follow.
     final class ResizeSession {
-        fileprivate let screen: NSScreen
-        fileprivate let layout: Layout
-        fileprivate let boundary: Int
-        fileprivate let leftEdge: Bool
-        fileprivate let draggedID: CGWindowID
+        let screen: NSScreen
+        let area: CGRect
+        let gap: Double
+        /// The layout with the column widths as dragged so far.
+        private(set) var layout: Layout
         fileprivate let windows: [(window: ManagedWindow, cell: Int)]
-        fileprivate var ratios: [Double]
+        fileprivate var changed = false
 
-        fileprivate init(screen: NSScreen, layout: Layout, boundary: Int, leftEdge: Bool, draggedID: CGWindowID,
-                         windows: [(window: ManagedWindow, cell: Int)]) {
+        fileprivate init(screen: NSScreen, layout: Layout, gap: Double, windows: [(window: ManagedWindow, cell: Int)]) {
             self.screen = screen
+            area = screen.axVisibleFrame
+            self.gap = gap
             self.layout = layout
-            self.boundary = boundary
-            self.leftEdge = leftEdge
-            self.draggedID = draggedID
             self.windows = windows
-            ratios = layout.fractions.map { $0 * 100 }
+        }
+
+        var columns: [CGRect] { Arranger.columns(for: layout, in: area, gap: gap) }
+        var cells: [CGRect] { Arranger.cells(for: layout, in: area, gap: gap) }
+
+        /// Moves the edge between column `boundary` and the next one to `x`, the middle of the gap between them.
+        /// False when the widths didn't change, they snap to 1%.
+        fileprivate func move(_ boundary: Int, toX x: CGFloat) -> Bool {
+            let edge = x - CGFloat(max(0, gap)) / 2
+            let position = Arranger.boundaryPosition(forEdge: edge, boundary: boundary, layout: layout, in: area, gap: gap)
+            guard position.isFinite else { return false }
+            let ratios = layout.resizedRatios(movingBoundary: boundary, to: position, step: 0.01)
+            guard ratios != layout.fractions.map({ ($0 * 10_000).rounded() / 100 }) else { return false }
+            layout.ratios = ratios
+            changed = true
+            return true
         }
     }
 
-    /// Starts resizing columns when a window that fills a cell is resized at its left or right edge and there's
-    /// a column on that side. Nil for anything else, e.g. resizing at the top or bottom.
-    func beginResize(_ windowID: CGWindowID, start: CGRect, current: CGRect) -> ResizeSession? {
-        guard AX.isTrusted, let screen = AX.screen(containing: start) else { return nil }
+    /// Column resizing for the display under `point`, once a layout with more than one column was applied there
+    /// or windows already fill its cells.
+    func beginColumnResize(at point: CGPoint) -> ResizeSession? {
+        guard AX.isTrusted, let screen = NSScreen.screens.first(where: { $0.axFrame.contains(point) }) else { return nil }
         let layout = layout(for: screen)
-        let area = screen.axVisibleFrame
-        let cells = Arranger.cells(for: layout, in: area, gap: store.config.gap)
-        guard let cell = cells.firstIndex(where: { Arranger.fills(start, $0) }) else { return nil }
-        let column = layout.cells[cell].column
-        let leftEdge = abs(current.minX - start.minX) > 1
-        guard leftEdge || abs(current.maxX - start.maxX) > 1 else { return nil }
-        let boundary = leftEdge ? column - 1 : column
-        guard boundary >= 0, boundary < layout.columnCount - 1 else { return nil }
+        guard layout.columnCount > 1 else { return nil }
+        let cells = Arranger.cells(for: layout, in: screen.axVisibleFrame, gap: store.config.gap)
         let windows = AX.visibleWindows(on: screen).compactMap { window in
             cells.firstIndex { Arranger.fills(window.frame, $0) }.map { (window, $0) }
         }
-        return ResizeSession(screen: screen, layout: layout, boundary: boundary, leftEdge: leftEdge, draggedID: windowID, windows: windows)
+        guard activeLayouts[screen.displayID] != nil || !windows.isEmpty else { return nil }
+        return ResizeSession(screen: screen, layout: layout, gap: store.config.gap, windows: windows)
     }
 
-    /// Moves the column edge along with the dragged window's edge, the other windows follow.
-    func updateResize(_ session: ResizeSession, frame: CGRect) {
-        guard let ratios = resizedRatios(session, frame: frame), ratios != session.ratios else { return }
-        session.ratios = ratios
-        let cells = resizedCells(session)
-        for (window, cell) in session.windows where window.windowID != session.draggedID {
-            AX.setFrameFast(window, to: cells[cell])
-        }
+    /// Moves a column edge, the windows follow right away. False when nothing changed.
+    @discardableResult
+    func resizeColumns(_ session: ResizeSession, boundary: Int, toX x: CGFloat) -> Bool {
+        guard session.move(boundary, toX: x) else { return false }
+        let cells = session.cells
+        for (window, cell) in session.windows { AX.setFrameFast(window, to: cells[cell]) }
+        return true
     }
 
-    /// Keeps the new column widths on this display and snaps every window, the dragged one too, into its cell.
-    func endResize(_ session: ResizeSession, frame: CGRect) {
-        if let ratios = resizedRatios(session, frame: frame) { session.ratios = ratios }
-        var adjusted = session.layout
-        adjusted.ratios = session.ratios
+    /// Keeps the new column widths on the display until a layout is applied again, and settles every window in its cell.
+    func endColumnResize(_ session: ResizeSession) {
+        guard session.changed else { return }
         let id = session.screen.displayID
-        adjustedLayouts[id] = adjusted
-        activeLayouts[id] = adjusted.id
-        let cells = resizedCells(session)
+        adjustedLayouts[id] = session.layout
+        activeLayouts[id] = session.layout.id
+        let cells = session.cells
         for (window, cell) in session.windows {
             // Their frames changed during the drag, and setFrame skips windows that already seem in place.
             AX.setFrame(window.with(frame: AX.frame(of: window.element) ?? window.frame), to: cells[cell])
         }
         onWindowsMoved?()
-    }
-
-    private func resizedRatios(_ session: ResizeSession, frame: CGRect) -> [Double]? {
-        let area = session.screen.axVisibleFrame
-        let gap = store.config.gap
-        // The left edge of the column after the boundary sits one gap right of the boundary's edge.
-        let edge = session.leftEdge ? frame.minX - CGFloat(max(0, gap)) : frame.maxX
-        let position = Arranger.boundaryPosition(forEdge: edge, boundary: session.boundary, layout: session.layout, in: area, gap: gap)
-        guard position.isFinite else { return nil }
-        return session.layout.resizedRatios(movingBoundary: session.boundary, to: position, step: 0.01)
-    }
-
-    private func resizedCells(_ session: ResizeSession) -> [CGRect] {
-        var layout = session.layout
-        layout.ratios = session.ratios
-        return Arranger.cells(for: layout, in: session.screen.axVisibleFrame, gap: store.config.gap)
     }
 
     // MARK: Stacks

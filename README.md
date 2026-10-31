@@ -51,17 +51,17 @@ All shortcuts can be changed in **Settings** (menu bar icon → Settings…), an
 
 Once a layout is applied on a display, windows you drag there snap into its cells:
 
-- **Move**: hold `⌘` while you drag a window by its title bar. The layout shows up on the display with the cell
-  under the pointer highlighted, and the window there sliding over to the cell yours came from. Drop it and the two
-  swap places. Add `⇧` to drop without swapping (the two share the cell). Without `⌘`, or after letting go of it,
-  windows move freely. The key can be changed in Settings → General.
-- **Resize**: drag the left or right side of a window in a column and the column follows, the windows next to it
-  grow or shrink along. The new widths stay until you apply a layout again, the saved layout doesn't change.
+- **Move**: drag a window by its title bar and the layout shows up on the display, with the cell under the pointer
+  highlighted and the window there sliding over to the cell yours came from. Drop it and the two swap places. Hold
+  `⇧` to drop without swapping (the two share the cell), or `⌥` to leave the window exactly where you dropped it.
+- **Resize**: hold `⌘` for a moment and the columns show up with their widths and a handle in every gap between
+  them. Drag a handle and the windows on both sides grow or shrink along. The new widths stay until you apply a
+  layout again, the saved layout doesn't change. The key can be changed in Settings → General.
 - **Stacked windows**: when more than one window shares a cell, a row of dots shows how many there are
   and which one is in front. Click a dot or scroll over the dots to bring another window to the front. Settings →
   Appearance moves the dots to the top, left or right of the cell.
 
-Both can be turned off in Settings → General.
+Each of them can be turned off in Settings → General.
 
 In Settings → Appearance, buttons, badges and highlights can follow the macOS accent color instead of omw blue.
 Layout icons and the blueprint stay omw blue.
