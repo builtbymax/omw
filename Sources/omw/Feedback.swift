@@ -91,13 +91,22 @@ private struct GhostView: View {
 
 @MainActor
 private final class HUDModel: ObservableObject {
+    struct Notice {
+        let title: String
+        let detail: String
+    }
+
     @Published var layout: Layout?
     @Published var count = 0
+    /// Something that didn't work, shown instead of the layout.
+    @Published var notice: Notice?
     @Published var visible = false
     var onUndo: () -> Void = {}
+    var onChooseLayout: () -> Void = {}
 }
 
-/// "Arranged 5 windows" confirmation at the bottom of the display, with Undo.
+/// "Arranged 5 windows" confirmation at the bottom of the display, with Undo. Also tells when a command
+/// needs a layout first.
 @MainActor
 final class HUDController {
     /// Room around the pill for its shadow (radius 20, y 10), so the panel edge never clips it.
@@ -107,24 +116,49 @@ final class HUDController {
     private let model = HUDModel()
     private var hideTask: Task<Void, Never>?
 
-    init(undo: @escaping () -> Void) {
+    init(undo: @escaping () -> Void, chooseLayout: @escaping () -> Void) {
         panel.setContentSize(Self.size)
         panel.contentView = NSHostingView(rootView: HUDView(model: model, bottomInset: Self.shadowInset))
         model.onUndo = { [weak self] in
             undo()
             self?.hide()
         }
+        model.onChooseLayout = { [weak self] in
+            self?.hide()
+            chooseLayout()
+        }
     }
 
     func show(_ layout: Layout, count: Int, on screen: NSScreen) {
-        let visible = screen.visibleFrame
-        panel.setFrameOrigin(NSPoint(x: visible.midX - Self.size.width / 2, y: visible.minY + 40 - Self.shadowInset))
         model.layout = layout
         model.count = count
+        model.notice = nil
+        present(on: screen)
+    }
+
+    /// A command that needs the columns of a layout ran on a workspace without one.
+    func showNoLayout(on screen: NSScreen, shortcut: Shortcut?) {
+        let detail = shortcut.map { "Apply one first, e.g. with \($0.displayString)." } ?? "Apply one first from the launcher."
+        // Showing again while it's up only restarts its timer, so holding a key doesn't make it flicker.
+        let showing = panel.isVisible && model.visible && model.notice != nil
+        model.notice = HUDModel.Notice(title: "No layout on this workspace", detail: detail)
+        if showing {
+            scheduleHide()
+        } else {
+            present(on: screen)
+        }
+    }
+
+    private func present(on screen: NSScreen) {
+        let visible = screen.visibleFrame
+        panel.setFrameOrigin(NSPoint(x: visible.midX - Self.size.width / 2, y: visible.minY + 40 - Self.shadowInset))
         model.visible = false
         panel.orderFrontRegardless()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { model.visible = true }
+        scheduleHide()
+    }
 
+    private func scheduleHide() {
         hideTask?.cancel()
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
@@ -151,7 +185,37 @@ private struct HUDView: View {
     var body: some View {
         VStack {
             Spacer(minLength: 0)
-            if model.visible, let layout = model.layout {
+            if model.visible, let notice = model.notice {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Color.orange.opacity(0.16)))
+                        .scaleEffect(bounce ? 1.12 : 1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(notice.title)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text(notice.detail)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 26)
+                    Button("Choose Layout") { model.onChooseLayout() }
+                        .buttonStyle(.glassCapsule(.secondary))
+                }
+                .padding(10)
+                .padding(.trailing, 4)
+                .background(RoundedRectangle(cornerRadius: 30, style: .continuous).fill(Color(hex: 0x141824, opacity: 0.6)))
+                .glassSurface(cornerRadius: 30, tint: Color(hex: 0x141824, opacity: 0.55))
+                .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
+                .transition(.move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.9)))
+                .onAppear {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.45).delay(0.12)) { bounce = true }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7).delay(0.3)) { bounce = false }
+                }
+            } else if model.visible, let layout = model.layout {
                 HStack(spacing: 12) {
                     LayoutIcon(layout: layout, size: 36)
                         .scaleEffect(bounce ? 1.12 : 1)

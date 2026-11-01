@@ -8,7 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let store = ConfigStore()
     private lazy var manager = WindowManager(store: store)
     private lazy var overlay = OverlayController(store: store, manager: manager) { [weak self] in self?.openSettings(layoutID: $0) }
-    private lazy var hud = HUDController { [weak self] in self?.manager.undo() }
+    private lazy var hud = HUDController(undo: { [weak self] in self?.manager.undo() },
+                                         chooseLayout: { [weak self] in self?.overlay.show() })
     private lazy var remote = RemoteController(store: store, manager: manager, overlay: overlay)
     private lazy var dragTracker = DragTracker(store: store, manager: manager)
     private lazy var stackIndicator = StackIndicatorController(store: store, manager: manager)
@@ -70,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.columnResize.setSuppressed(dragging)
             self.stackIndicator.setSuspended(self.draggingWindow || self.resizingColumns)
         }
+        columnResize.onNoLayout = { [weak self] screen in self?.showNoLayout(on: screen) }
         columnResize.onVisible = { [weak self] visible in
             guard let self else { return }
             self.resizingColumns = visible
@@ -109,6 +111,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             + config.layouts.map { "\($0.id):\($0.shortcut?.stringValue ?? "")" }
     }
 
+    private func perform(_ command: WindowCommand) {
+        if case let .noLayout(display) = manager.perform(command),
+           let screen = NSScreen.screens.first(where: { $0.displayID == display }) {
+            showNoLayout(on: screen)
+        }
+    }
+
+    private func showNoLayout(on screen: NSScreen) {
+        NSSound.beep()
+        hud.showNoLayout(on: screen, shortcut: store.config.overlayShortcut)
+    }
+
     private func registerHotkeys(_ config: Config) {
         let hotkeys = HotkeyCenter.shared
         hotkeys.unregisterAll()
@@ -117,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         for command in WindowCommand.allCases {
             guard let shortcut = config[keyPath: command.keyPath] else { continue }
-            hotkeys.register(shortcut) { [weak self] in self?.manager.perform(command) }
+            hotkeys.register(shortcut) { [weak self] in self?.perform(command) }
         }
         for layout in config.layouts {
             guard let shortcut = layout.shortcut else { continue }
@@ -154,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if index > 0, command.style != WindowCommand.allCases[index - 1].style { move.submenu?.addItem(.separator()) }
             let title = command.title.replacingOccurrences(of: "Move Window ", with: "").capitalizingFirstLetter
             move.submenu?.addItem(ClosureMenuItem(title, symbol: command.symbol, shortcut: config[keyPath: command.keyPath]) { [weak self] in
-                self?.manager.perform(command)
+                self?.perform(command)
             })
         }
         menu.addItem(move)

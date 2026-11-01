@@ -22,6 +22,8 @@ final class ColumnResizeController {
 
     /// True while the handles are on screen.
     var onVisible: ((Bool) -> Void)?
+    /// The keys were held on a display whose current Space has no layout.
+    var onNoLayout: ((NSScreen) -> Void)?
 
     /// Holding the keys this long shows the handles, so shortcuts like ⌃⌥1 don't flash them.
     private static let delay = 0.3
@@ -86,7 +88,17 @@ final class ColumnResizeController {
     }
 
     private func show() {
-        guard keyHeld, let point = CGEvent(source: nil)?.location, let session = manager.beginColumnResize(at: point) else { return }
+        guard keyHeld, let point = CGEvent(source: nil)?.location else { return }
+        let session: WindowManager.ResizeSession
+        switch manager.beginColumnResize(at: point) {
+        case let .success(started):
+            session = started
+        case let .failure(.noLayout(display)):
+            if let screen = NSScreen.screens.first(where: { $0.displayID == display }) { onNoLayout?(screen) }
+            return
+        case .failure:
+            return
+        }
         self.session = session
         let screen = session.screen
         let count = session.layout.columnCount - 1
