@@ -47,6 +47,9 @@ and installed copies update themselves with [Sparkle](https://sparkle-project.or
 
 All shortcuts can be changed in **Settings** (menu bar icon → Settings…), and every layout can get its own shortcut.
 
+Layouts belong to a workspace: each Space on each display keeps the one applied there. The moves above, column
+resizing and snapping need one, on a workspace without a layout omw says so and offers the launcher.
+
 ### Dragging windows
 
 Once a layout is applied on a display, windows you drag there snap into its cells:

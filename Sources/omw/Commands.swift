@@ -96,6 +96,30 @@ enum WindowCommand: String, CaseIterable, Identifiable {
 @_silgen_name("CGSMainConnectionID") private func CGSMainConnectionID() -> Int32
 @_silgen_name("CGSCopyManagedDisplaySpaces") private func CGSCopyManagedDisplaySpaces(_ connection: Int32) -> CFArray
 
+enum Spaces {
+    /// The Spaces of a display left to right and the one showing, nil when macOS doesn't say.
+    static func of(_ screen: NSScreen) -> (spaces: [Int], current: Int)? {
+        guard let uuid = CGDisplayCreateUUIDFromDisplayID(screen.displayID)?.takeRetainedValue(),
+              let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID()) as? [[String: Any]] else { return nil }
+        let id = CFUUIDCreateString(nil, uuid) as String
+        // With "Displays have separate Spaces" off there's one entry for all displays.
+        guard let display = displays.count == 1 ? displays.first : displays.first(where: { $0["Display Identifier"] as? String == id }),
+              let spaces = (display["Spaces"] as? [[String: Any]])?.compactMap({ $0["ManagedSpaceID"] as? Int }),
+              let current = (display["Current Space"] as? [String: Any])?["ManagedSpaceID"] as? Int else { return nil }
+        return (spaces, current)
+    }
+}
+
+/// A Space on a display: layouts are applied to one, other Spaces on the same display keep their own.
+struct Workspace: Hashable {
+    let display: CGDirectDisplayID
+    let space: Int
+}
+
+extension NSScreen {
+    var workspace: Workspace { Workspace(display: displayID, space: Spaces.of(self)?.current ?? 0) }
+}
+
 /// Moves a window to the neighbouring Space. macOS has no public API for this, so it does what
 /// a person would do: drag the window by its title bar and press the Mission Control shortcut
 /// for switching Spaces (System Settings → Keyboard → Shortcuts → Mission Control).
@@ -183,14 +207,7 @@ enum SpaceMover {
     /// Whether the window's display has a Space in that direction, nil when macOS doesn't say.
     /// Without this check the first and last Space look like the command is broken.
     private static func hasSpace(beside window: ManagedWindow, by delta: Int) -> Bool? {
-        guard let screen = AX.screen(containing: window.frame),
-              let uuid = CGDisplayCreateUUIDFromDisplayID(screen.displayID)?.takeRetainedValue(),
-              let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID()) as? [[String: Any]] else { return nil }
-        let id = CFUUIDCreateString(nil, uuid) as String
-        // With "Displays have separate Spaces" off there's one entry for all displays.
-        guard let display = displays.count == 1 ? displays.first : displays.first(where: { $0["Display Identifier"] as? String == id }),
-              let spaces = (display["Spaces"] as? [[String: Any]])?.compactMap({ $0["ManagedSpaceID"] as? Int }),
-              let current = (display["Current Space"] as? [String: Any])?["ManagedSpaceID"] as? Int,
+        guard let screen = AX.screen(containing: window.frame), let (spaces, current) = Spaces.of(screen),
               let index = spaces.firstIndex(of: current) else { return nil }
         return spaces.indices.contains(index + delta)
     }
