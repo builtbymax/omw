@@ -360,7 +360,7 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         config.dragToSnap = false
         config.stackIndicatorPosition = .left
         config.columnResizeKeys = [.option, .command]
-        config.dragFreeKey = .control
+        config.dragFreeKey = .command
         let decoded = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(config))
         #expect(decoded.moveLeftShortcut == nil)
         #expect(decoded.launcherOnPrimaryDisplay)
@@ -368,7 +368,7 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(!decoded.dragToSnap && decoded.showStackIndicator)
         #expect(decoded.stackIndicatorPosition == .left)
         #expect(decoded.columnResizeKeys == [.option, .command] && decoded.columnResize)
-        #expect(decoded.dragFreeKey == .control)
+        #expect(decoded.dragFreeKey == .command)
         #expect(decoded.moveRightShortcut == config.moveRightShortcut)
 
         let minimal = try JSONDecoder().decode(Config.self, from: Data("{}".utf8))

@@ -56,7 +56,7 @@ Once a layout is applied on a display, windows you drag there snap into its cell
 
 - **Move**: drag a window by its title bar and the layout shows up on the display, with the cell under the pointer
   highlighted and the window there sliding over to the cell yours came from. Drop it and the two swap places. Hold
-  `⇧` to drop without swapping (the two share the cell), or `⌥` to leave the window exactly where you dropped it.
+  `⇧` to drop without swapping (the two share the cell), or `⌃` to leave the window exactly where you dropped it.
   Windows with a fixed size, like most settings windows, never snap.
 - **Resize**: hold `⌃⌥` for a moment and the columns show up with their widths and a handle in every gap between
   them. Drag a handle and the windows on both sides grow or shrink along. A column stops at the narrowest its

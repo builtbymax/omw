@@ -89,7 +89,7 @@ public struct Config: Codable, Equatable {
         showMenuBarIcon: Bool = true,
         launcherOnPrimaryDisplay: Bool = false,
         dragToSnap: Bool = true,
-        dragFreeKey: ModifierKey = .option,
+        dragFreeKey: ModifierKey = .control,
         columnResize: Bool = true,
         columnResizeKeys: [ModifierKey] = [.control, .option],
         showStackIndicator: Bool = true,
