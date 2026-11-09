@@ -50,6 +50,15 @@ final class ConfigStore: ObservableObject {
         config.layouts.first { $0.id == id }
     }
 
+    func workspace(id: UUID) -> Workspace? {
+        config.workspaces.first { $0.id == id }
+    }
+
+    /// The workspace one of whose displays has the layout `id`.
+    func workspace(containingLayout id: UUID) -> Workspace? {
+        config.workspaces.first { $0.displays.contains { $0.layout.id == id } }
+    }
+
     private func save() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

@@ -3,7 +3,7 @@ import OMWCore
 import SwiftUI
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, appearance, layouts, shortcuts, about
+    case general, appearance, layouts, workspaces, shortcuts, about
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .general: .general
         case .appearance: .appearance
         case .layouts: .layouts
+        case .workspaces: .workspaces
         case .shortcuts: .shortcuts
         case .about: .about
         }
@@ -24,7 +25,8 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .general: "Startup, permissions, spacing and the config file."
         case .appearance: "Colors, highlights and the stacked window dots."
         case .layouts: "Columns, shortcuts and preferred columns per layout."
-        case .shortcuts: "Global shortcuts and one per layout."
+        case .workspaces: "Apps pinned to columns across your displays, applied in one go."
+        case .shortcuts: "Global shortcuts and one per layout or workspace."
         case .about: "oh my windows"
         }
     }
@@ -35,6 +37,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .appearance: "accent color theme system blue stacked windows dots position"
         case .general: "launch login startup accessibility permission gap spacing animate animation drag drop snap resize columns handles width stack dots confirmation hud config file finder cli terminal command line"
         case .layouts: "columns ratio preferred pin apps"
+        case .workspaces: "workspace pinned apps launch open displays monitors multiple setup"
         case .shortcuts: "hotkey keyboard open move window left right"
         case .about: "version info"
         }
@@ -46,11 +49,14 @@ enum SettingsPage: String, CaseIterable, Identifiable {
 final class SettingsNavigation: ObservableObject {
     @Published var page: SettingsPage = .general
     @Published var layoutID: UUID?
+    @Published var workspaceID: UUID?
 }
 
 struct SettingsView: View {
     @ObservedObject var store: ConfigStore
     @ObservedObject var navigation: SettingsNavigation
+    /// Applies a workspace, for its Apply button.
+    var applyWorkspace: (UUID) -> Void = { _ in }
     @State private var search = ""
 
     static let size = CGSize(width: 900, height: 640)
@@ -66,6 +72,7 @@ struct SettingsView: View {
                 case .general: GeneralSettings(store: store)
                 case .appearance: AppearanceSettings(store: store)
                 case .layouts: LayoutSettings(store: store, selection: $navigation.layoutID)
+                case .workspaces: WorkspaceSettings(store: store, selection: $navigation.workspaceID, apply: applyWorkspace)
                 case .shortcuts: ShortcutSettings(store: store)
                 case .about: AboutSettings(store: store)
                 }
@@ -110,6 +117,8 @@ struct SettingsView: View {
                         Spacer()
                         if page == .layouts {
                             Text("\(store.config.layouts.count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        } else if page == .workspaces, !store.config.workspaces.isEmpty {
+                            Text("\(store.config.workspaces.count)").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                         }
                     }
                     .padding(.horizontal, 8)
@@ -146,7 +155,7 @@ struct SettingsView: View {
 
 // MARK: - Building blocks
 
-private struct PageHeader<Trailing: View>: View {
+struct PageHeader<Trailing: View>: View {
     let page: SettingsPage
     var title: String?
     var subtitle: String?
@@ -171,7 +180,7 @@ extension PageHeader where Trailing == EmptyView {
     }
 }
 
-private struct SettingsSection<Content: View>: View {
+struct SettingsSection<Content: View>: View {
     let title: String?
     var footer: String?
     @ViewBuilder var content: Content
@@ -189,7 +198,7 @@ private struct SettingsSection<Content: View>: View {
     }
 }
 
-private struct SettingsRow<Leading: View, Trailing: View>: View {
+struct SettingsRow<Leading: View, Trailing: View>: View {
     let title: String
     var subtitle: String?
     var monoSubtitle = false
@@ -300,7 +309,7 @@ private struct ColumnsHelp: View {
     }
 }
 
-private struct ScrollPage<Content: View>: View {
+struct ScrollPage<Content: View>: View {
     var leading: CGFloat = 28
     @ViewBuilder var content: Content
 
@@ -719,6 +728,17 @@ private struct ShortcutSettings: View {
                     }
                 }
             }
+
+            if !store.config.workspaces.isEmpty {
+                SettingsSection(title: "Workspaces") {
+                    ForEach($store.config.workspaces) { $workspace in
+                        SettingsRow(.workspaces, workspace.name, subtitle: workspace.summary,
+                                    divider: workspace.id != store.config.workspaces.first?.id) {
+                            ShortcutRecorder(shortcut: $workspace.shortcut, isTaken: workspace.shortcut.map(hotkeys.failed.contains) ?? false)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1096,7 +1116,7 @@ private extension NSImage {
 }
 
 /// Layout name as an inline-editable title.
-private struct EditableTitle: View {
+struct EditableTitle: View {
     @Binding var text: String
     @FocusState private var focused: Bool
     @State private var hovered = false
@@ -1133,7 +1153,7 @@ private struct EditableTitle: View {
 }
 
 /// "− 3 columns +" control under the blueprint. Adding splits the widest column.
-private struct ColumnStepper: View {
+struct ColumnStepper: View {
     @Binding var layout: Layout
 
     var body: some View {
@@ -1174,10 +1194,14 @@ private struct ColumnStepper: View {
 }
 
 /// Blueprint preview of the layout where the edges between columns can be dragged.
-private struct BlueprintEditor: View {
+struct BlueprintEditor: View {
     @Binding var layout: Layout
+    /// Set for workspaces: pinned apps can be dragged between cells, an app dropped on a cell is pinned there.
+    var dropApp: ((_ bundleID: String, _ cell: Int) -> Void)?
+    var removeApp: ((_ bundleID: String) -> Void)?
     @State private var dragging: Int?
     @State private var hoveredColumn: Int?
+    @State private var dropTarget: Int?
 
     private let pad: CGFloat = 14
     private let gap: CGFloat = 10
@@ -1280,25 +1304,39 @@ private struct BlueprintEditor: View {
     private func cell(_ cell: Int, percent: Double) -> some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         let apps = layout.pins.filter { $0.value == cell }.keys.sorted()
+        let targeted = dropTarget == cell
         return VStack(spacing: 6) {
             Text("\(Int((percent * 100).rounded()))%")
                 .font(.system(size: 15, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color(hex: 0x0B2E80))
                 .contentTransition(.numericText())
             if !apps.isEmpty {
-                HStack(spacing: -4) {
-                    ForEach(apps, id: \.self) { bundleID in
-                        if let icon = AppIdentity(bundleID: bundleID).icon {
-                            Image(nsImage: icon).resizable().frame(width: 18, height: 18)
+                if dropApp != nil {
+                    // Room to grab each icon: they wrap instead of overlapping.
+                    WrappingIcons(apps: apps, size: 24, remove: removeApp)
+                } else {
+                    HStack(spacing: -4) {
+                        ForEach(apps, id: \.self) { bundleID in
+                            if let icon = AppIdentity(bundleID: bundleID).icon {
+                                Image(nsImage: icon).resizable().frame(width: 18, height: 18)
+                            }
                         }
                     }
                 }
             }
         }
+        .padding(4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(shape.fill(LinearGradient(colors: [.white.opacity(0.92), Color(hex: 0xE0EBFF, opacity: 0.68)], startPoint: .top, endPoint: .bottom)))
-        .overlay(shape.strokeBorder(.white.opacity(0.85), lineWidth: 1))
+        .overlay(shape.strokeBorder(targeted ? Theme.brandText : .white.opacity(0.85), lineWidth: targeted ? 2.5 : 1))
+        .scaleEffect(targeted ? 1.03 : 1)
         .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: targeted)
+        .modifier(AppDrop(enabled: dropApp != nil) { bundleID in
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { dropApp?(bundleID, cell) }
+        } targeted: { isTargeted in
+            if isTargeted { dropTarget = cell } else if dropTarget == cell { dropTarget = nil }
+        })
     }
 
     /// Free space that never gets a window, e.g. the sides of a centered layout.

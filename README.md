@@ -104,6 +104,14 @@ wide middle column. A column written as `_20` stays empty: `_20/60/_20` puts win
 and leaves the sides free. In the blueprint, hover a column and use its row buttons, below one row it
 becomes empty.
 
+### Workspaces
+
+A workspace pins apps to columns on one or more displays. Set one up in Settings → Workspaces: pick
+the displays it covers, choose their columns, and drag apps onto a column (**Choose App…** adds apps
+that aren't running). Applying a workspace, from its shortcut, the menu bar or Settings, opens the
+pinned apps that aren't running and puts every pinned app in its column. Windows of other apps stay
+where they are. Applying a layout afterwards takes over, and re-applying the workspace brings it back.
+
 ### How windows are assigned
 
 Every window fills a cell: a whole column, or one row of it. When there are more windows than cells, the
