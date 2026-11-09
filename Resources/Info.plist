@@ -30,14 +30,18 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
 	<key>SUFeedURL</key>
 	<string>https://github.com/builtbymax/omw/releases/latest/download/appcast.xml</string>
+	<!-- Output of Sparkle's generate_keys. The updater stays off while this is empty. -->
 	<key>SUPublicEDKey</key>
 	<string>2ADMRn2lAL3dzpYq9I41yDfWQ0v2Eb7kHI5ZK6J3Ing=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<!-- The appcast and its release notes have to carry an EdDSA signature too, not just the zip.
+	     generate_appcast signs them because of this key, see scripts/release.sh. -->
 	<key>SURequireSignedFeed</key>
 	<true/>
+	<!-- Check the zip's EdDSA signature before unpacking it, not after. -->
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
 </dict>
