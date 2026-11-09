@@ -111,13 +111,13 @@ enum Spaces {
 }
 
 /// A Space on a display: layouts are applied to one, other Spaces on the same display keep their own.
-struct Workspace: Hashable {
+struct DisplaySpace: Hashable {
     let display: CGDirectDisplayID
     let space: Int
 }
 
 extension NSScreen {
-    var workspace: Workspace { Workspace(display: displayID, space: Spaces.of(self)?.current ?? 0) }
+    var space: DisplaySpace { DisplaySpace(display: displayID, space: Spaces.of(self)?.current ?? 0) }
 }
 
 /// Moves a window to the neighbouring Space. macOS has no public API for this, so it does what

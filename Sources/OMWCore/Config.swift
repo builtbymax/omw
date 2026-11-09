@@ -29,6 +29,8 @@ public enum ModifierKey: String, Codable, CaseIterable, Sendable {
 
 public struct Config: Codable, Equatable {
     public var layouts: [Layout]
+    /// Saved arrangements of pinned apps across displays.
+    public var workspaces: [Workspace]
     /// Space in points around and between windows, 0 to `maxGap`.
     public var gap: Double
     public var overlayShortcut: Shortcut?
@@ -69,6 +71,7 @@ public struct Config: Codable, Equatable {
 
     public init(
         layouts: [Layout] = Layout.defaults,
+        workspaces: [Workspace] = [],
         gap: Double = 8,
         overlayShortcut: Shortcut? = Shortcut(string: "ctrl+opt+space"),
         moveLeftShortcut: Shortcut? = Shortcut(string: "ctrl+opt+cmd+left"),
@@ -98,6 +101,7 @@ public struct Config: Codable, Equatable {
         lastLayoutID: UUID? = nil
     ) {
         self.layouts = layouts
+        self.workspaces = workspaces
         self.gap = gap
         self.overlayShortcut = overlayShortcut
         self.moveLeftShortcut = moveLeftShortcut
@@ -130,7 +134,7 @@ public struct Config: Codable, Equatable {
     public static let maxGap = 100.0
 
     private enum CodingKeys: String, CodingKey {
-        case layouts, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
+        case layouts, workspaces, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
         case moveLeftNoSwapShortcut, moveRightNoSwapShortcut, moveUpNoSwapShortcut, moveDownNoSwapShortcut
         case moveToNextDisplayShortcut, moveToPreviousDisplayShortcut, moveToNextSpaceShortcut, moveToPreviousSpaceShortcut
         case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, dragToSnap, dragFreeKey, columnResize, columnResizeKeys, showStackIndicator, stackIndicatorPosition
@@ -145,6 +149,7 @@ public struct Config: Codable, Equatable {
             c.contains(key) ? try c.decodeIfPresent(Shortcut.self, forKey: key) : fallback
         }
         layouts = try c.decodeIfPresent([Layout].self, forKey: .layouts) ?? d.layouts
+        workspaces = try c.decodeIfPresent([Workspace].self, forKey: .workspaces) ?? d.workspaces
         gap = try c.decodeIfPresent(Double.self, forKey: .gap) ?? d.gap
         guard gap.isFinite, (0...Self.maxGap).contains(gap) else {
             throw DecodingError.dataCorruptedError(forKey: .gap, in: c, debugDescription: "\"gap\" needs to be between 0 and \(Int(Self.maxGap)).")
@@ -182,6 +187,7 @@ public struct Config: Codable, Equatable {
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(layouts, forKey: .layouts)
+        try c.encode(workspaces, forKey: .workspaces)
         try c.encode(gap, forKey: .gap)
         try c.encode(overlayShortcut, forKey: .overlayShortcut)
         try c.encode(moveLeftShortcut, forKey: .moveLeftShortcut)

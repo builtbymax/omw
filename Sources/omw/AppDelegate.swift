@@ -107,8 +107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Hotkeys
 
     private static func hotkeySignature(_ config: Config) -> [String] {
-        ([config.overlayShortcut] + WindowCommand.allCases.map { config[keyPath: $0.keyPath] }).map { $0?.stringValue ?? "" }
-            + config.layouts.map { "\($0.id):\($0.shortcut?.stringValue ?? "")" }
+        let global: [String] = ([config.overlayShortcut] + WindowCommand.allCases.map { config[keyPath: $0.keyPath] })
+            .map { $0?.stringValue ?? "" }
+        let layouts: [String] = config.layouts.map { "\($0.id):\($0.shortcut?.stringValue ?? "")" }
+        let workspaces: [String] = config.workspaces.map { "\($0.id):\($0.shortcut?.stringValue ?? "")" }
+        return global + layouts + workspaces
     }
 
     private func perform(_ command: WindowCommand) {
@@ -138,10 +141,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let id = layout.id
             hotkeys.register(shortcut) { [weak self] in self?.applyLayout(id: id) }
         }
+        for workspace in config.workspaces {
+            guard let shortcut = workspace.shortcut else { continue }
+            let id = workspace.id
+            hotkeys.register(shortcut) { [weak self] in self?.applyWorkspace(id: id) }
+        }
     }
 
     private func applyLayout(id: UUID) {
         if let layout = store.layout(id: id) { manager.apply(layout) }
+    }
+
+    private func applyWorkspace(id: UUID) {
+        guard let workspace = store.workspace(id: id) else { return }
+        if case .failure = manager.apply(workspace) { NSSound.beep() }
     }
 
     // MARK: Menu bar
@@ -150,14 +163,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         let config = store.config
         let activeID = manager.activeLayoutID(on: AX.targetScreen())
-        let active = activeID.flatMap(store.layout(id:))
+        let activeName = activeID.flatMap { store.layout(id: $0)?.name ?? store.workspace(containingLayout: $0)?.name }
 
-        menu.addItem(hostingItem(MenuHeader(layoutName: active?.name, trusted: AX.isTrusted)))
+        menu.addItem(hostingItem(MenuHeader(layoutName: activeName, trusted: AX.isTrusted)))
         menu.addItem(.separator())
         menu.addItem(hostingItem(QuickLayouts(layouts: config.layouts, activeID: activeID) { [weak self, weak menu] id in
             menu?.cancelTracking()
             DispatchQueue.main.async { self?.applyLayout(id: id) }
         }))
+        if !config.workspaces.isEmpty {
+            let workspaces = NSMenuItem(title: "Workspaces", action: nil, keyEquivalent: "")
+            workspaces.image = NSImage(systemSymbolName: "rectangle.3.group", accessibilityDescription: nil)
+            workspaces.submenu = NSMenu()
+            for workspace in config.workspaces {
+                let id = workspace.id
+                workspaces.submenu?.addItem(ClosureMenuItem(workspace.name, shortcut: workspace.shortcut) { [weak self] in self?.applyWorkspace(id: id) })
+            }
+            menu.addItem(workspaces)
+        }
         menu.addItem(.separator())
 
         menu.addItem(ClosureMenuItem("Open omw…", symbol: "magnifyingglass", shortcut: config.overlayShortcut) { [weak self] in self?.overlay.show() })
@@ -207,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             settingsNavigation.layoutID = layoutID
         }
         if settingsWindow == nil {
-            let hosting = NSHostingController(rootView: SettingsView(store: store, navigation: settingsNavigation))
+            let hosting = NSHostingController(rootView: SettingsView(store: store, navigation: settingsNavigation) { [weak self] in self?.applyWorkspace(id: $0) })
             hosting.sizingOptions = []
             let window = NSWindow(contentViewController: hosting)
             window.title = "omw Settings"

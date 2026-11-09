@@ -5,6 +5,7 @@ import OMWCore
 enum ActionError: Error {
     case notTrusted, noDisplay, noFocusedWindow, edge, singleDisplay, noNewWindows, nothingToUndo
     case noSpace, spaceShortcutOff(right: Bool), noLayout(display: CGDirectDisplayID)
+    case emptyWorkspace, noWorkspaceDisplay
 
     var message: String {
         switch self {
@@ -17,6 +18,8 @@ enum ActionError: Error {
         case .nothingToUndo: "Nothing to undo."
         case .noSpace: "There's no workspace in that direction."
         case .noLayout: "No layout is applied on this workspace yet."
+        case .emptyWorkspace: "The workspace has no apps pinned yet."
+        case .noWorkspaceDisplay: "None of the workspace's displays are connected."
         case let .spaceShortcutOff(right):
             "The Mission Control shortcut \u{201C}Move \(right ? "right" : "left") a space\u{201D} is turned off in System Settings → Keyboard → Keyboard Shortcuts."
         }
@@ -27,17 +30,19 @@ enum ActionError: Error {
 final class WindowManager {
     private let store: ConfigStore
     /// The layout last applied on each display's Space, used to know the columns when moving windows.
-    private var activeLayouts: [Workspace: UUID] = [:]
+    private var activeLayouts: [DisplaySpace: UUID] = [:]
     /// Windows the active layout placed on each display. Anything else is new to "Refresh Layout".
-    private var arrangedWindows: [Workspace: Set<CGWindowID>] = [:]
-    /// Frames from before the last arrange, so it can be undone.
-    private var undoState: (moves: [(window: ManagedWindow, frame: CGRect)], workspace: Workspace, layoutID: UUID?,
-                            arranged: Set<CGWindowID>?)?
+    private var arrangedWindows: [DisplaySpace: Set<CGWindowID>] = [:]
+    /// Frames from before the last arrange, and what was active on each Space it touched, so it can be undone.
+    private var undoState: (moves: [(window: ManagedWindow, frame: CGRect)],
+                            spaces: [(space: DisplaySpace, layoutID: UUID?, arranged: Set<CGWindowID>?)])?
+    /// Bumped by every arrange, so windows of apps a workspace launched stop being placed once something else was applied.
+    private var arrangeGeneration = 0
     private let animator = FrameAnimator()
     /// Layouts applied from the launcher without saving them, so "Refresh Layout" still finds them.
     private var unsavedLayouts: [UUID: Layout] = [:]
     /// The active layout with the column widths dragged on each display. Applying a layout again resets them.
-    private var adjustedLayouts: [Workspace: Layout] = [:]
+    private var adjustedLayouts: [DisplaySpace: Layout] = [:]
 
     /// Called after a layout was applied with the number of windows that were arranged.
     var onArranged: ((Layout, Int, NSScreen) -> Void)?
@@ -53,13 +58,13 @@ final class WindowManager {
     /// Whether the columns on the screen's current Space are known: a layout was applied there, or windows
     /// already fill its cells (after omw restarted).
     func hasLayout(on screen: NSScreen) -> Bool {
-        if activeLayouts[screen.workspace] != nil { return true }
+        if activeLayouts[screen.space] != nil { return true }
         let cells = Arranger.cells(for: layout(for: screen), in: screen.axVisibleFrame, gap: store.config.gap)
         return AX.visibleWindows(on: screen).contains { window in cells.contains { Arranger.fills(window.frame, $0) } }
     }
 
     func activeLayoutID(on screen: NSScreen?) -> UUID? {
-        screen.flatMap { activeLayouts[$0.workspace] }
+        screen.flatMap { activeLayouts[$0.space] }
     }
 
     /// The number of windows that were arranged, and on which display.
@@ -70,11 +75,12 @@ final class WindowManager {
         let windows = AX.visibleWindows(on: screen).filter { layout.arranges(appID: $0.bundleID) }
         let area = screen.axVisibleFrame
         let assignment = Arranger.assign(snapshots(windows), layout: layout, in: area, pinned: true, balanced: true)
-        undoState = (windows.map { ($0, $0.frame) }, screen.workspace, activeLayouts[screen.workspace], arrangedWindows[screen.workspace])
-        adjustedLayouts[screen.workspace] = nil
+        undoState = (windows.map { ($0, $0.frame) }, [undoEntry(screen.space)])
+        arrangeGeneration += 1
+        adjustedLayouts[screen.space] = nil
         place(windows, assignment, layout: layout, area: area)
-        activeLayouts[screen.workspace] = layout.id
-        arrangedWindows[screen.workspace] = Set(windows.map(\.windowID))
+        activeLayouts[screen.space] = layout.id
+        arrangedWindows[screen.space] = Set(windows.map(\.windowID))
         if store.layout(id: layout.id) == nil {
             unsavedLayouts[layout.id] = layout
         } else {
@@ -94,7 +100,7 @@ final class WindowManager {
         let area = screen.axVisibleFrame
         let cells = Arranger.cells(for: layout, in: area, gap: store.config.gap)
         let windows = AX.visibleWindows(on: screen).filter { layout.arranges(appID: $0.bundleID) }
-        let arranged = (arrangedWindows[screen.workspace] ?? [])
+        let arranged = (arrangedWindows[screen.space] ?? [])
             .union(windows.filter { window in cells.contains { Arranger.fills(window.frame, $0) } }.map(\.windowID))
         let new = windows.filter { !arranged.contains($0.windowID) }
         guard !new.isEmpty else {
@@ -103,10 +109,10 @@ final class WindowManager {
         }
         let existing = windows.filter { arranged.contains($0.windowID) }
         let assignment = Arranger.assignNew(snapshots(new), existing: snapshots(existing), layout: layout, in: area)
-        undoState = (new.map { ($0, $0.frame) }, screen.workspace, activeLayouts[screen.workspace], arrangedWindows[screen.workspace])
+        undoState = (new.map { ($0, $0.frame) }, [undoEntry(screen.space)])
         place(new, assignment, layout: layout, area: area)
-        activeLayouts[screen.workspace] = layout.id
-        arrangedWindows[screen.workspace] = arranged.union(new.map(\.windowID))
+        activeLayouts[screen.space] = layout.id
+        arrangedWindows[screen.space] = arranged.union(new.map(\.windowID))
         onArranged?(layout, new.count, screen)
         return .success(new.count)
     }
@@ -122,10 +128,109 @@ final class WindowManager {
             return (move.window.with(frame: current), move.frame)
         }
         animator.run(moves, animated: store.config.animate)
-        activeLayouts[state.workspace] = state.layoutID
-        arrangedWindows[state.workspace] = state.arranged
+        for entry in state.spaces {
+            activeLayouts[entry.space] = entry.layoutID
+            arrangedWindows[entry.space] = entry.arranged
+        }
         onWindowsMoved?()
         return nil
+    }
+
+    private func undoEntry(_ space: DisplaySpace) -> (space: DisplaySpace, layoutID: UUID?, arranged: Set<CGWindowID>?) {
+        (space, activeLayouts[space], arrangedWindows[space])
+    }
+
+    // MARK: Workspaces
+
+    /// Puts every open pinned app of the workspace in its cell, on the workspace's displays that are
+    /// connected, and launches the pinned apps that have no window yet. Their windows are placed as
+    /// they show up. Windows of other apps stay where they are. Returns the number of windows arranged
+    /// right away and the number of apps launched.
+    @discardableResult
+    func apply(_ workspace: Workspace) -> Result<(count: Int, launched: Int), ActionError> {
+        guard ensureTrusted() else { return .failure(.notTrusted) }
+        guard !workspace.apps.isEmpty else { return .failure(.emptyWorkspace) }
+        let targets = workspaceTargets(workspace)
+        guard let first = targets.first else { return .failure(.noWorkspaceDisplay) }
+
+        let windows = AX.visibleWindows(on: nil)
+        var moves: [(window: ManagedWindow, frame: CGRect, crossesDisplays: Bool)] = []
+        var placed: [DisplaySpace: Set<CGWindowID>] = [:]
+        for window in windows {
+            guard let (display, cell) = workspace.placement(of: window.bundleID),
+                  let target = targets.first(where: { $0.display == display }) else { continue }
+            let cells = Arranger.cells(for: target.layout, in: target.screen.axVisibleFrame, gap: store.config.gap)
+            moves.append((window, cells[cell], AX.screen(containing: window.frame) != target.screen))
+            placed[target.screen.space, default: []].insert(window.windowID)
+        }
+
+        arrangeGeneration += 1
+        undoState = (moves.map { ($0.window, $0.window.frame) }, targets.map { undoEntry($0.screen.space) })
+        for target in targets {
+            let space = target.screen.space
+            adjustedLayouts[space] = nil
+            activeLayouts[space] = target.layout.id
+            arrangedWindows[space] = placed[space] ?? []
+            unsavedLayouts[target.layout.id] = target.layout
+        }
+        // Across displays windows jump: gliding over the gap between screens looks broken.
+        for move in moves where move.crossesDisplays { AX.setFrame(move.window, to: move.frame) }
+        animator.run(moves.filter { !$0.crossesDisplays }.map { ($0.window, $0.frame) }, animated: store.config.animate)
+        onWindowsMoved?()
+
+        let open = Set(windows.compactMap(\.bundleID))
+        let missing = workspace.apps.filter { app in
+            !open.contains(app) && workspace.placement(of: app).map { p in targets.contains { $0.display == p.display } } == true
+        }
+        let launched = missing.filter(Self.launch)
+        if !launched.isEmpty { placeLaunched(Set(launched), of: workspace, generation: arrangeGeneration) }
+        onArranged?(first.layout, moves.count, first.screen)
+        return .success((moves.count, launched.count))
+    }
+
+    /// The workspace's displays that are connected, with the columns as they're applied.
+    private func workspaceTargets(_ workspace: Workspace) -> [(display: String, screen: NSScreen, layout: Layout)] {
+        workspace.displays.compactMap { display in
+            guard let screen = NSScreen.screens.first(where: { $0.uuid == display.displayID }) else { return nil }
+            var layout = display.layout
+            layout.name = workspace.name
+            layout.pinnedOnly = true
+            return (display.displayID, screen, layout)
+        }
+    }
+
+    /// Opens an app that has no window on the current desktop. A running app is asked to reopen,
+    /// which brings back a window, or unhides it.
+    private static func launch(_ bundleID: String) -> Bool {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return false }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        return true
+    }
+
+    /// Watches for the windows of apps the workspace launched and puts them in their cells. An app is
+    /// done a little after its first window showed up, apps that restore several windows open them one by one.
+    private func placeLaunched(_ apps: Set<String>, of workspace: Workspace, generation: Int,
+                               firstSeen: [String: Date] = [:], deadline: Date = .now + 20) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, generation == self.arrangeGeneration else { return }
+            var firstSeen = firstSeen
+            let targets = workspaceTargets(workspace)
+            for window in AX.visibleWindows(on: nil) {
+                guard let app = window.bundleID, apps.contains(app),
+                      let (display, cell) = workspace.placement(of: app),
+                      let target = targets.first(where: { $0.display == display }) else { continue }
+                let space = target.screen.space
+                guard activeLayouts[space] == target.layout.id, arrangedWindows[space]?.contains(window.windowID) != true else { continue }
+                let cells = Arranger.cells(for: target.layout, in: target.screen.axVisibleFrame, gap: store.config.gap)
+                AX.setFrame(window, to: cells[cell])
+                arrangedWindows[space, default: []].insert(window.windowID)
+                firstSeen[app] = firstSeen[app] ?? .now
+                onWindowsMoved?()
+            }
+            let done = apps.allSatisfy { firstSeen[$0].map { Date.now.timeIntervalSince($0) > 2 } ?? false }
+            guard !done, Date.now < deadline else { return }
+            placeLaunched(apps, of: workspace, generation: generation, firstSeen: firstSeen, deadline: deadline)
+        }
     }
 
     /// Moves the focused window one cell left/right (dx) or up/down (dy). With `swap`, the window that's
@@ -148,8 +253,8 @@ final class WindowManager {
             return .edge
         }
         place(windows, next, layout: layout, area: area)
-        activeLayouts[screen.workspace] = layout.id
-        arrangedWindows[screen.workspace] = Set(windows.map(\.windowID))
+        activeLayouts[screen.space] = layout.id
+        arrangedWindows[screen.space] = Set(windows.map(\.windowID))
         return nil
     }
 
@@ -220,8 +325,8 @@ final class WindowManager {
 
     private func layout(for screen: NSScreen) -> Layout {
         let layouts = store.config.layouts
-        let id = activeLayouts[screen.workspace] ?? store.config.lastLayoutID
-        if let adjusted = adjustedLayouts[screen.workspace], adjusted.id == id { return adjusted }
+        let id = activeLayouts[screen.space] ?? store.config.lastLayoutID
+        if let adjusted = adjustedLayouts[screen.space], adjusted.id == id { return adjusted }
         return layouts.first { $0.id == id } ?? id.flatMap { unsavedLayouts[$0] } ?? layouts.first ?? Layout(name: "Halves", ratios: [50, 50])
     }
 
@@ -240,7 +345,7 @@ final class WindowManager {
     /// Whether windows dragged on `screen` snap into its cells: once a layout was applied there, or when
     /// the window started out in one of them (after omw restarted).
     private func snaps(on screen: NSScreen, start: CGRect) -> Bool {
-        activeLayouts[screen.workspace] != nil
+        activeLayouts[screen.space] != nil
             || Arranger.cells(for: layout(for: screen), in: screen.axVisibleFrame, gap: store.config.gap).contains { Arranger.fills(start, $0) }
     }
 
@@ -307,8 +412,8 @@ final class WindowManager {
             moves.append((partner.window.with(frame: frame), preview.cells[partner.cell]))
         }
         animator.run(moves, animated: store.config.animate)
-        activeLayouts[preview.screen.workspace] = layout(for: preview.screen).id
-        arrangedWindows[preview.screen.workspace, default: []].formUnion(moves.map(\.0.windowID))
+        activeLayouts[preview.screen.space] = layout(for: preview.screen).id
+        arrangedWindows[preview.screen.space, default: []].formUnion(moves.map(\.0.windowID))
         onWindowsMoved?()
         return true
     }
@@ -428,7 +533,7 @@ final class WindowManager {
         let windows = AX.visibleWindows(on: screen).compactMap { window in
             cells.firstIndex { Arranger.fills(window.frame, $0) }.map { (window, $0) }
         }
-        guard activeLayouts[screen.workspace] != nil || !windows.isEmpty else { return .failure(.noLayout(display: screen.displayID)) }
+        guard activeLayouts[screen.space] != nil || !windows.isEmpty else { return .failure(.noLayout(display: screen.displayID)) }
         // One column has no edge to drag.
         guard layout.columnCount > 1 else { return .failure(.edge) }
         return .success(ResizeSession(screen: screen, layout: layout, gap: store.config.gap, windows: windows))
@@ -449,7 +554,7 @@ final class WindowManager {
             session.restoreEnhancedUI()
             return
         }
-        let id = session.screen.workspace
+        let id = session.screen.space
         adjustedLayouts[id] = session.layout
         activeLayouts[id] = session.layout.id
         let cells = session.cells
@@ -486,7 +591,7 @@ final class WindowManager {
 
     /// Cells with more than one window in them on displays with an active layout, windows front to back.
     func stacks() -> [(screen: NSScreen, cell: CGRect, windows: [ManagedWindow])] {
-        NSScreen.screens.filter { activeLayouts[$0.workspace] != nil }.flatMap { screen in
+        NSScreen.screens.filter { activeLayouts[$0.space] != nil }.flatMap { screen in
             let cells = Arranger.cells(for: layout(for: screen), in: screen.axVisibleFrame, gap: store.config.gap)
             let windows = AX.visibleWindows(on: screen)
             return zip(cells, Arranger.stacks(windows.map(\.frame), cells: cells))

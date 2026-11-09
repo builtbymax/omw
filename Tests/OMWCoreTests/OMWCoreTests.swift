@@ -396,6 +396,54 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
     }
 }
 
+@Suite struct WorkspaceTests {
+    private let workspace = Workspace(name: "Work", displays: [
+        WorkspaceDisplay(displayID: "left", displayName: "Studio Display", layout: Layout(name: "Work", ratios: [50, 50], pins: ["slack": 0])),
+        WorkspaceDisplay(displayID: "right", displayName: "Built-in", layout: Layout(name: "Work", ratios: [20, 60, 20], pins: ["vscode": 1, "claude": 2])),
+    ])
+
+    @Test func findsWhereEveryAppGoes() {
+        #expect(workspace.apps == ["slack", "vscode", "claude"])
+        #expect(workspace.placement(of: "vscode")! == ("right", 1))
+        #expect(workspace.placement(of: "spotify") == nil)
+        #expect(workspace.placement(of: nil) == nil)
+        // Windows outside the workspace stay floating.
+        #expect(workspace.displays.allSatisfy { $0.layout.pinnedOnly })
+    }
+
+    @Test func anAppIsPinnedToOnePlaceOnly() {
+        let moved = workspace.pinning("slack", display: "right", cell: 0)
+        #expect(moved.placement(of: "slack")! == ("right", 0))
+        #expect(moved.displays[0].layout.pins.isEmpty)
+        // A cell or display that doesn't exist changes nothing.
+        #expect(workspace.pinning("slack", display: "right", cell: 3) == workspace)
+        #expect(workspace.pinning("slack", display: "gone", cell: 0) == workspace)
+        #expect(workspace.unpinning("claude").apps == ["slack", "vscode"])
+    }
+
+    @Test func ignoresPinsOutsideTheColumns() throws {
+        var broken = workspace
+        broken.displays[0].layout.pins["linear"] = 5
+        broken.displays[1].layout.pins["linear"] = 0
+        #expect(broken.placement(of: "linear")! == ("right", 0))
+    }
+
+    @Test func roundTripsThroughTheConfig() throws {
+        var config = Config()
+        var saved = workspace
+        saved.shortcut = Shortcut(string: "ctrl+opt+w")
+        config.workspaces = [saved]
+        let decoded = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(config))
+        #expect(decoded.workspaces == [saved])
+        #expect(try JSONDecoder().decode(Config.self, from: Data("{}".utf8)).workspaces.isEmpty)
+
+        let json = #"{"workspaces": [{"name": "Hand", "displays": [{"display": "x", "layout": {"name": "a", "ratios": [50, 50], "pins": {"mail": 1}}}]}]}"#
+        let hand = try #require(try JSONDecoder().decode(Config.self, from: Data(json.utf8)).workspaces.first)
+        #expect(hand.displays[0].layout.pinnedOnly && hand.displays[0].displayName == "Display")
+        #expect(hand.placement(of: "mail")! == ("x", 1))
+    }
+}
+
 @Suite struct FuzzyTests {
     @Test func matchesWordsAndRatios() {
         #expect(Fuzzy.score("code layout", in: "Code 20/60/20 Layout") != nil)

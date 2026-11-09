@@ -305,3 +305,10 @@ extension NSScreen {
         return CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
     }
 }
+
+extension NSScreen {
+    /// The display's UUID, which stays the same across restarts unlike `displayID`. Workspaces remember displays by it.
+    var uuid: String? {
+        CGDisplayCreateUUIDFromDisplayID(displayID).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String }
+    }
+}

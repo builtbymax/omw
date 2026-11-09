@@ -157,12 +157,13 @@ struct BlueprintGrid: Shape {
 /// Colored glass tile with a white SF Symbol, like System Settings.
 struct IconTile: View {
     enum Style {
-        case general, layouts, shortcuts, windows, login, accessibility, config, move, moveVertical, slide, slideVertical, display, spaces, about, search, quit, undo, refresh, update, menuBar, appearance, terminal
+        case general, layouts, workspaces, shortcuts, windows, login, accessibility, config, move, moveVertical, slide, slideVertical, display, spaces, about, search, quit, undo, refresh, update, menuBar, appearance, terminal
 
         var symbol: String {
             switch self {
             case .general: "gearshape.fill"
             case .layouts: "rectangle.split.3x1.fill"
+            case .workspaces: "rectangle.3.group.fill"
             case .shortcuts: "command"
             case .windows: "rectangle.split.2x1"
             case .login: "power"
@@ -190,6 +191,7 @@ struct IconTile: View {
             switch self {
             case .general, .search: (0x8E9AAF, 0x5B6478)
             case .layouts: (0x4C9BFF, 0x1A56DB)
+            case .workspaces: (0xFF9F6E, 0xE5532E)
             case .shortcuts: (0xB57BFF, 0x7C3AED)
             case .windows: (0x3DD6C6, 0x0E9488)
             case .login: (0x5EE08A, 0x16A34A)
