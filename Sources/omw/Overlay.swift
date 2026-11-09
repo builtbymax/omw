@@ -436,6 +436,11 @@ final class OverlayController: NSObject, NSWindowDelegate {
                                         detail: "Puts the windows back where they were before the last layout was applied.",
                                         actionTitle: "Undo") { [weak self] in self?.manager.undo() })
         }
+        if Updater.shared.isAvailable {
+            commands.append(OverlayItem(id: "check-updates", title: "Check for Updates…", section: .commands, icon: .tile(.update),
+                                        detail: "Looks for a newer version of omw and offers to install it. Tells you when omw is up to date or the check fails, e.g. when you're offline.",
+                                        actionTitle: "Check") { Updater.shared.checkForUpdates() })
+        }
         commands += [
             OverlayItem(id: "settings", title: "Settings…", keys: ["⌘", ","], section: .commands, icon: .tile(.general),
                         detail: "Layouts, shortcuts, gaps and startup options.",
