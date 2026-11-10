@@ -335,8 +335,19 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(Layout(name: "Full", ratios: [100]).removingColumn(at: 0).ratios == [100])
     }
 
+    @Test func equalColumnsStayEqual() {
+        let halves = Layout(name: "Halves", ratios: [50, 50])
+        let thirds = halves.addingColumn()
+        #expect(thirds.ratios == [33.33, 33.33, 33.33])
+        #expect(thirds.hasEqualColumns)
+        #expect(thirds.addingColumn().ratios == [25, 25, 25, 25])
+        #expect(thirds.removingColumn(at: 2).ratios == [50, 50])
+        #expect(focus.resizedRatios(movingBoundary: 1, to: 0.67) == [20, 46.67, 33.33])
+    }
+
     @Test func draggingAColumnEdgeSnapsAndOnlyTouchesNeighbours() {
-        #expect(focus.resizedRatios(movingBoundary: 0, to: 0.33) == [35, 45, 20])
+        #expect(focus.resizedRatios(movingBoundary: 0, to: 0.36) == [35, 45, 20])
+        #expect(focus.resizedRatios(movingBoundary: 0, to: 0.33) == [33.33, 46.67, 20])
         #expect(focus.resizedRatios(movingBoundary: 1, to: 0.99) == [20, 75, 5])
         #expect(focus.resizedRatios(movingBoundary: 0, to: -1) == [5, 75, 20])
         #expect(focus.resizedRatios(movingBoundary: 2, to: 0.5) == [20, 60, 20])

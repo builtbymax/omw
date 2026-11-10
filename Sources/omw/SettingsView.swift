@@ -1152,7 +1152,7 @@ struct EditableTitle: View {
     }
 }
 
-/// "− 3 columns +" control under the blueprint. Adding splits the widest column.
+/// "− 3 columns +" control under the blueprint. Adding splits the widest column, equal columns stay equal.
 struct ColumnStepper: View {
     @Binding var layout: Layout
 
@@ -1166,7 +1166,7 @@ struct ColumnStepper: View {
                 .monospacedDigit()
                 .contentTransition(.numericText())
                 .frame(minWidth: 76)
-            button("plus", enabled: layout.columnCount < Layout.maxColumns, help: "Split the widest column") {
+            button("plus", enabled: layout.columnCount < Layout.maxColumns, help: layout.hasEqualColumns ? "Add a column" : "Split the widest column") {
                 layout = layout.addingColumn()
             }
         }
