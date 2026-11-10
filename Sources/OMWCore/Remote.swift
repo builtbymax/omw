@@ -4,10 +4,13 @@ import Foundation
 public enum RemoteCommand: Codable, Equatable, Sendable {
     /// A layout by name, ratios or id, like the launcher search. `display` is a name or a 1-based index.
     case apply(layout: String, display: String?)
+    /// A workspace by name or id, like the launcher search.
+    case applyWorkspace(String)
     case move(WindowMove)
     case refresh
     case undo
     case layouts
+    case workspaces
     case displays
     case open
     case reload
@@ -17,12 +20,14 @@ public enum RemoteCommand: Codable, Equatable, Sendable {
 
     Commands:
       apply <layout> [--display <name|number>]   Apply a layout by name or ratios ("code", "20/60", "halves")
+      workspace <name>                           Apply a workspace: open its apps and put them in their columns
       move left|right|up|down [--no-swap]        Move the focused window to the neighbouring cell
       move --display next|previous               Move the focused window to another display
       move --space next|previous                 Move the focused window to another workspace
       refresh                                    Place windows opened since the layout was applied
       undo                                       Undo the last arrange
       layouts                                    List layouts
+      workspaces                                 List workspaces
       displays                                   List displays with their numbers for --display
       open                                       Show the launcher
       reload                                     Re-read ~/.config/omw/config.json
@@ -50,14 +55,19 @@ public enum RemoteCommand: Codable, Equatable, Sendable {
             let layout = words.joined(separator: " ").trimmingCharacters(in: .whitespaces)
             guard !layout.isEmpty else { throw UsageError("Which layout? Try: omw apply code") }
             return .apply(layout: layout, display: display)
+        case "workspace":
+            let workspace = rest.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            guard !workspace.isEmpty else { throw UsageError("Which workspace? See: omw workspaces") }
+            return .applyWorkspace(workspace)
         case "move":
             return .move(try WindowMove.parse(rest))
-        case "refresh", "undo", "layouts", "displays", "open", "reload":
+        case "refresh", "undo", "layouts", "workspaces", "displays", "open", "reload":
             guard rest.isEmpty else { throw UsageError("\(name) takes no arguments.") }
             switch name {
             case "refresh": return .refresh
             case "undo": return .undo
             case "layouts": return .layouts
+            case "workspaces": return .workspaces
             case "displays": return .displays
             case "open": return .open
             default: return .reload
@@ -139,6 +149,18 @@ extension Layout {
         }
         return layouts.enumerated()
             .compactMap { index, layout in Fuzzy.score(trimmed, in: "\(layout.name) \(layout.ratioLabel)").map { (layout, $0, index) } }
+            .max { $0.1 != $1.1 ? $0.1 < $1.1 : $0.2 > $1.2 }?.0
+    }
+}
+
+extension Workspace {
+    /// The workspace a CLI argument means: exact name, id, then the best fuzzy match on the name.
+    public static func find(_ query: String, in workspaces: [Workspace]) -> Workspace? {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        if let match = workspaces.first(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) { return match }
+        if let id = UUID(uuidString: trimmed), let match = workspaces.first(where: { $0.id == id }) { return match }
+        return workspaces.enumerated()
+            .compactMap { index, workspace in Fuzzy.score(trimmed, in: workspace.name).map { (workspace, $0, index) } }
             .max { $0.1 != $1.1 ? $0.1 < $1.1 : $0.2 > $1.2 }?.0
     }
 }

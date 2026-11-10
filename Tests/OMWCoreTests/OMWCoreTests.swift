@@ -476,6 +476,9 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(try RemoteCommand.parse(["move", "--display", "next"]) == .move(.nextDisplay))
         #expect(try RemoteCommand.parse(["move", "--space", "previous"]) == .move(.previousSpace))
         #expect(try RemoteCommand.parse(["undo"]) == .undo)
+        #expect(try RemoteCommand.parse(["workspace", "deep", "work"]) == .applyWorkspace("deep work"))
+        #expect(try RemoteCommand.parse(["workspaces"]) == .workspaces)
+        #expect(throws: UsageError.self) { try RemoteCommand.parse(["workspace"]) }
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["apply"]) }
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["apply", "code", "--display"]) }
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["move", "sideways"]) }
@@ -491,6 +494,14 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(RemoteCommand.displayIndex(number: 1, count: 0) == nil)
         #expect(RemoteCommand.displayIndex(number: .min, count: 2) == nil)
         #expect(RemoteCommand.displayIndex(number: .max, count: 2) == nil)
+    }
+
+    @Test func findsWorkspacesByNameOrID() {
+        let workspaces = [Workspace(name: "Deep Work"), Workspace(name: "Small"), Workspace(name: "Calls")]
+        #expect(Workspace.find("small", in: workspaces)?.name == "Small")
+        #expect(Workspace.find("deep", in: workspaces)?.name == "Deep Work")
+        #expect(Workspace.find(workspaces[2].id.uuidString, in: workspaces)?.name == "Calls")
+        #expect(Workspace.find("qqq", in: workspaces) == nil)
     }
 
     @Test func findsLayoutsLikeTheLauncher() {

@@ -10,6 +10,7 @@ struct OverlayItem: Identifiable {
 
     enum Section: String {
         case layouts = "Layouts"
+        case workspaces = "Workspaces"
         case commands = "Commands"
     }
 
@@ -22,10 +23,18 @@ struct OverlayItem: Identifiable {
     /// Shown in the preview pane for commands.
     var detail: String = ""
     var layout: Layout?
+    var workspace: Workspace?
     let actionTitle: String
     let run: () -> Void
 
-    var searchText: String { [title, badge ?? "", section == .layouts ? "layout" : "command"].joined(separator: " ") }
+    var searchText: String {
+        let kind = switch section {
+        case .layouts: "layout"
+        case .workspaces: "workspace"
+        case .commands: "command"
+        }
+        return [title, badge ?? "", kind].joined(separator: " ")
+    }
 }
 
 /// Something the ⌘K menu can do with the selected item.
@@ -295,7 +304,9 @@ final class OverlayController: NSObject, NSWindowDelegate {
             switch event.charactersIgnoringModifiers {
             case "k": self.model.toggleActions()
             case "e":
-                guard let id = self.model.selected?.layout?.id, self.store.layout(id: id) != nil else { return event }
+                let selected = self.model.selected
+                guard let id = selected?.workspace?.id ?? selected?.layout?.id,
+                      self.store.layout(id: id) != nil || self.store.workspace(id: id) != nil else { return event }
                 self.hide()
                 self.openSettings(id)
             case ",":
@@ -344,9 +355,24 @@ final class OverlayController: NSObject, NSWindowDelegate {
         manager.apply(layout, on: screen)
     }
 
+    private func applyWorkspace(_ id: UUID) {
+        guard let workspace = store.workspace(id: id) else { return }
+        if case .failure = manager.apply(workspace) { NSSound.beep() }
+    }
+
     private func actions(for item: OverlayItem) -> [OverlayAction] {
         var actions: [OverlayAction] = []
-        if let layout = item.layout, store.layout(id: layout.id) != nil {
+        if let workspace = item.workspace, store.workspace(id: workspace.id) != nil {
+            let id = workspace.id
+            actions.append(OverlayAction(id: "apply", title: "Apply Workspace", style: .workspaces, keys: ["↩"]) { [weak self] in
+                self?.hide()
+                self?.applyWorkspace(id)
+            })
+            actions.append(OverlayAction(id: "edit", title: "Edit Workspace…", style: .general, keys: ["⌘", "E"]) { [weak self] in
+                self?.hide()
+                self?.openSettings(id)
+            })
+        } else if let layout = item.layout, store.layout(id: layout.id) != nil {
             let id = layout.id
             actions.append(OverlayAction(id: "apply", title: "Apply Layout", style: .layouts, keys: ["↩"]) { [weak self] in
                 self?.hide()
@@ -414,9 +440,23 @@ final class OverlayController: NSObject, NSWindowDelegate {
         ) { [weak self] in self?.apply(layout.id) }
     }
 
+    private func workspaceItem(_ workspace: Workspace) -> OverlayItem {
+        OverlayItem(
+            id: workspace.id.uuidString,
+            title: workspace.name,
+            badge: workspace.summary,
+            keys: workspace.shortcut?.displayKeys ?? [],
+            section: .workspaces,
+            icon: .tile(.workspaces),
+            workspace: workspace,
+            actionTitle: "Apply Workspace"
+        ) { [weak self] in self?.applyWorkspace(workspace.id) }
+    }
+
     private func items() -> [OverlayItem] {
         let config = store.config
         let layouts = config.layouts.map(layoutItem)
+        let workspaces = config.workspaces.map(workspaceItem)
         var commands: [OverlayItem] = []
         if let version = Updater.shared.pendingVersion {
             commands.append(OverlayItem(id: "update", title: "Install Update (\(version))", section: .commands, icon: .tile(.update),
@@ -448,7 +488,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
             OverlayItem(id: "quit", title: "Quit omw", section: .commands, icon: .tile(.quit),
                         detail: "Stops omw and frees its shortcuts.", actionTitle: "Quit") { NSApp.terminate(nil) },
         ]
-        return layouts + commands
+        return layouts + workspaces + commands
     }
 }
 
@@ -555,7 +595,7 @@ struct OverlayView: View {
                     if model.results.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "rectangle.dashed").font(.system(size: 28)).opacity(0.4)
-                            Text("No matching layouts or commands").foregroundStyle(.secondary)
+                            Text("No matching layouts, workspaces or commands").foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 80)
@@ -584,9 +624,9 @@ struct OverlayView: View {
     /// Results grouped by section, keeping their flat index for selection.
     private var sections: [(title: String, indices: [Int])] {
         if !model.query.isEmpty { return [("Results", Array(model.results.indices))] }
-        let layouts = model.results.indices.filter { model.results[$0].section == .layouts }
-        let commands = model.results.indices.filter { model.results[$0].section == .commands }
-        return [("Layouts", layouts), ("Commands", commands)].filter { !$0.1.isEmpty }
+        return [OverlayItem.Section.layouts, .workspaces, .commands]
+            .map { section in (section.rawValue, model.results.indices.filter { model.results[$0].section == section }) }
+            .filter { !$0.1.isEmpty }
     }
 
     private var footer: some View {
@@ -695,7 +735,9 @@ private struct PreviewPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let item = model.selected {
-                if let layout = item.layout {
+                if let workspace = item.workspace {
+                    workspacePreview(workspace)
+                } else if let layout = item.layout {
                     layoutPreview(layout)
                 } else {
                     commandPreview(item)
@@ -745,6 +787,43 @@ private struct PreviewPane: View {
                         .frame(width: 40, alignment: .leading)
                         .padding(.top, 3)
                         FlowChips(bundleIDs: cells[cell])
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    /// Every display of the workspace with the apps pinned to its cells.
+    @ViewBuilder
+    private func workspacePreview(_ workspace: Workspace) -> some View {
+        let connected = Set(NSScreen.screens.compactMap(\.uuid))
+        VStack(alignment: .leading, spacing: 4) {
+            Text(workspace.name).font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
+            Text(workspace.apps.isEmpty ? "\(workspace.summary) · pin apps in Settings" : "\(workspace.summary) · opens apps that aren't running")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(workspace.displays) { display in
+                    let layout = display.layout
+                    let cells = (0..<layout.cellCount).map { cell in
+                        layout.pins.filter { $0.value == cell }.keys.sorted().map { Optional($0) }
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "display").font(.system(size: 10, weight: .semibold))
+                            Text(display.displayName).font(.system(size: 11, weight: .medium))
+                            if !connected.contains(display.displayID) { StatusBadge(text: "Not connected") }
+                        }
+                        .foregroundStyle(.white.opacity(0.55))
+                        DisplayPreview(fractions: layout.fractions, rows: layout.rowCounts, cells: cells)
+                            .frame(height: workspace.displays.count == 1 ? 168 : 120)
+                            .opacity(connected.contains(display.displayID) ? 1 : 0.5)
                     }
                 }
             }
@@ -990,7 +1069,7 @@ struct SearchField: NSViewRepresentable {
         field.font = .systemFont(ofSize: 20, weight: .regular)
         field.textColor = .white
         field.placeholderAttributedString = NSAttributedString(
-            string: "Search layouts and commands…",
+            string: "Search layouts, workspaces and commands…",
             attributes: [.foregroundColor: NSColor.white.withAlphaComponent(0.38), .font: NSFont.systemFont(ofSize: 20)]
         )
         field.cell?.isScrollable = true
