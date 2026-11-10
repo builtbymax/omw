@@ -174,6 +174,7 @@ private struct WorkspaceDetail: View {
                 VStack(alignment: .leading, spacing: 2) {
                     EditableTitle(text: $workspace.name)
                     Text(workspace.summary).font(.system(size: 12)).foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize()
                 }
                 Spacer()
                 Button("Apply", action: onApply)
