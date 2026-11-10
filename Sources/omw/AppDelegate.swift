@@ -59,9 +59,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .sink { [weak self] config in self?.registerHotkeys(config) }
             .store(in: &subscriptions)
 
-        manager.onArranged = { [weak self] layout, count, screen in
-            guard let self, self.store.config.showHUD else { return }
-            self.hud.show(layout, count: count, on: screen)
+        manager.onArranged = { [weak self] layout, count, screen, note in
+            // A note says something didn't happen, so it shows even with the HUD off.
+            guard let self, self.store.config.showHUD || note != nil else { return }
+            self.hud.show(layout, count: count, note: note, on: screen)
         }
 
         manager.onWindowsMoved = { [weak self] in self?.stackIndicator.scheduleRefresh() }

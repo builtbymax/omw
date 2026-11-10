@@ -44,8 +44,9 @@ final class WindowManager {
     /// The active layout with the column widths dragged on each display. Applying a layout again resets them.
     private var adjustedLayouts: [DisplaySpace: Layout] = [:]
 
-    /// Called after a layout was applied with the number of windows that were arranged.
-    var onArranged: ((Layout, Int, NSScreen) -> Void)?
+    /// Called after a layout was applied with the number of windows that were arranged, and a note
+    /// when some couldn't be.
+    var onArranged: ((Layout, Int, NSScreen, String?) -> Void)?
     /// Called whenever omw moved windows, so the stack dots can catch up.
     var onWindowsMoved: (() -> Void)?
 
@@ -86,7 +87,7 @@ final class WindowManager {
         } else {
             store.config.lastLayoutID = layout.id
         }
-        onArranged?(layout, windows.count, screen)
+        onArranged?(layout, windows.count, screen, nil)
         return .success((windows.count, screen))
     }
 
@@ -113,7 +114,7 @@ final class WindowManager {
         place(new, assignment, layout: layout, area: area)
         activeLayouts[screen.space] = layout.id
         arrangedWindows[screen.space] = arranged.union(new.map(\.windowID))
-        onArranged?(layout, new.count, screen)
+        onArranged?(layout, new.count, screen, nil)
         return .success(new.count)
     }
 
@@ -144,10 +145,11 @@ final class WindowManager {
 
     /// Puts every open pinned app of the workspace in its cell, on the workspace's displays that are
     /// connected, and launches the pinned apps that have no window yet. Their windows are placed as
-    /// they show up. Windows of other apps stay where they are. Returns the number of windows arranged
-    /// right away and the number of apps launched.
+    /// they show up. Windows of other apps stay where they are. Pinned apps whose windows are all on
+    /// other Spaces are left alone, opening them would switch to their Space. Returns the number of
+    /// windows arranged right away, the number of apps launched and the names of the apps left alone.
     @discardableResult
-    func apply(_ workspace: Workspace) -> Result<(count: Int, launched: Int), ActionError> {
+    func apply(_ workspace: Workspace) -> Result<(count: Int, launched: Int, elsewhere: [String]), ActionError> {
         guard ensureTrusted() else { return .failure(.notTrusted) }
         guard !workspace.apps.isEmpty else { return .failure(.emptyWorkspace) }
         let targets = workspaceTargets(workspace)
@@ -182,10 +184,26 @@ final class WindowManager {
         let missing = workspace.apps.filter { app in
             !open.contains(app) && workspace.placement(of: app).map { p in targets.contains { $0.display == p.display } } == true
         }
-        let launched = missing.filter(Self.launch)
+        let away = Spaces.appsOnlyElsewhere()
+        let elsewhere = NSWorkspace.shared.runningApplications.filter { app in
+            app.bundleIdentifier.map(missing.contains) == true && away.contains(app.processIdentifier)
+        }
+        let skipped = Set(elsewhere.compactMap(\.bundleIdentifier))
+        let launched = missing.filter { !skipped.contains($0) }.filter(Self.launch)
         if !launched.isEmpty { placeLaunched(Set(launched), of: workspace, generation: arrangeGeneration) }
-        onArranged?(first.layout, moves.count, first.screen)
-        return .success((moves.count, launched.count))
+        let names = elsewhere.compactMap(\.localizedName)
+        onArranged?(first.layout, moves.count, first.screen, Self.elsewhereNote(names))
+        return .success((moves.count, launched.count, names))
+    }
+
+    /// "Spotify is in another workspace", for pinned apps the workspace left on their Space.
+    static func elsewhereNote(_ names: [String]) -> String? {
+        switch names.count {
+        case 0: nil
+        case 1: "\(names[0]) is in another workspace"
+        case 2: "\(names[0]) and \(names[1]) are in other workspaces"
+        default: "\(names.count) apps are in other workspaces"
+        }
     }
 
     /// The workspace's displays that are connected, with the columns as they're applied.
