@@ -63,8 +63,10 @@ Once a layout is applied on a display, windows you drag there snap into its cell
   windows get, the handle turns orange there. The new widths stay until you apply a layout again, the saved
   layout doesn't change. Both keys can be changed in Settings → General.
 - **Stacked windows**: when more than one window shares a cell, a row of dots shows how many there are
-  and which one is in front. Click a dot or scroll over the dots to bring another window to the front. Settings →
-  Appearance moves the dots to the top, left or right of the cell.
+  and which one is in front. Click a dot or scroll over the dots to bring another window to the front. Hover a dot
+  to preview its window, hold a dot to drag the dots into another order (Esc or a click elsewhere ends it).
+  Settings → Appearance moves the dots to the top, left or right of the cell and picks the preview: the window,
+  just its app icon, or none.
 
 Each of them can be turned off in Settings → General.
 

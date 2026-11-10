@@ -620,9 +620,18 @@ private struct AppearanceSettings: View {
             }
 
             SettingsSection(title: "Stacked windows") {
-                SettingsRow(.spaces, "Dots position", subtitle: "Where the dots sit in a cell with more than one window.", divider: false) {
+                SettingsRow(.spaces, "Dots position", subtitle: "Where the dots sit in a cell with more than one window.") {
                     SegmentPicker(selection: $store.config.stackIndicatorPosition, options: StackIndicatorPosition.allCases) {
                         $0.rawValue.capitalized
+                    }
+                }
+                SettingsRow(.windows, "Dots preview", subtitle: "What hovering a dot shows of the window behind it.", divider: false) {
+                    SegmentPicker(selection: $store.config.stackPreview, options: StackPreviewStyle.allCases) {
+                        switch $0 {
+                        case .window: "Window"
+                        case .icon: "App icon"
+                        case .none: "No preview"
+                        }
                     }
                 }
             }

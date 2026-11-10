@@ -1,5 +1,6 @@
 import AppKit
 import OMWCore
+import ScreenCaptureKit
 import SwiftUI
 
 /// Click-through, transparent panel that covers a display.
@@ -386,16 +387,27 @@ private final class StackModel: ObservableObject {
     struct Item: Identifiable {
         let id: CGWindowID
         let title: String
+        let bundleID: String?
+        let size: CGSize
     }
 
-    /// The windows in a cell in a stable order, so the dots don't jump around when one comes to the front.
+    /// The windows in a cell in the order the user gave them, else a stable one, so the dots don't
+    /// jump around when one comes to the front.
     @Published var items: [Item] = []
     @Published var frontID: CGWindowID?
     @Published var vertical = false
     /// The pointer is over the pill, and over which dot.
     @Published var inside = false
     @Published var hovered: CGWindowID?
+    /// The dots jiggle and can be dragged into another order.
+    @Published var reordering = false
+    /// The dot being dragged while reordering.
+    @Published var lifted: CGWindowID?
     var onSelect: (CGWindowID) -> Void = { _ in }
+    /// The new order of the windows after a dot was dropped.
+    var onReorder: ([CGWindowID]) -> Void = { _ in }
+    /// The hovered dot and its frame on screen, nil when the pointer left the dots.
+    var onHover: (Item?, NSRect) -> Void = { _, _ in }
 
     func select(_ index: Int) {
         guard items.indices.contains(index) else { return }
@@ -408,12 +420,22 @@ private final class StackModel: ObservableObject {
         let index = items.firstIndex { $0.id == frontID } ?? 0
         select((index + delta + items.count) % items.count)
     }
+
+    func move(_ id: CGWindowID, to index: Int) {
+        guard let from = items.firstIndex(where: { $0.id == id }), from != index, items.indices.contains(index) else { return }
+        items.insert(items.remove(at: from), at: index)
+    }
 }
 
-/// Handles clicks and scrolling on the dots itself: SwiftUI gestures miss clicks now and then in a panel
-/// that never becomes key.
-private final class StackHostingView: NSHostingView<StackDotsView>, NSViewToolTipOwner {
+/// Handles clicks, press-and-hold reordering and scrolling on the dots itself: SwiftUI gestures miss
+/// clicks now and then in a panel that never becomes key.
+private final class StackHostingView: NSHostingView<StackDotsView> {
     private var scrolled: CGFloat = 0
+    private var pressed: Int?
+    private var holdTimer: Timer?
+    private var monitors: [Any] = []
+
+    private static let holdDuration: TimeInterval = 0.45
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -422,7 +444,80 @@ private final class StackHostingView: NSHostingView<StackDotsView>, NSViewToolTi
     }
 
     override func mouseDown(with event: NSEvent) {
-        if let index = dotIndex(at: convert(event.locationInWindow, from: nil)) { rootView.model.select(index) }
+        let model = rootView.model
+        pressed = dotIndex(at: convert(event.locationInWindow, from: nil))
+        guard let pressed else { return }
+        model.onHover(nil, .zero)
+        if model.reordering {
+            lift(pressed)
+            return
+        }
+        // Holding a dot starts reordering, a click brings its window to the front.
+        let timer = Timer(timeInterval: Self.holdDuration, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.beginReordering() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        holdTimer = timer
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let model = rootView.model
+        guard let lifted = model.lifted else { return }
+        let slot = slot(at: convert(event.locationInWindow, from: nil))
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) { model.move(lifted, to: slot) }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        holdTimer?.invalidate()
+        holdTimer = nil
+        let model = rootView.model
+        let point = convert(event.locationInWindow, from: nil)
+        defer { pressed = nil }
+        guard model.reordering else {
+            if let pressed, pressed == dotIndex(at: point) { model.select(pressed) }
+            return
+        }
+        if model.lifted != nil {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) { model.lifted = nil }
+            model.onReorder(model.items.map(\.id))
+        }
+        if !bounds.contains(point) { endReordering() }
+    }
+
+    private func beginReordering() {
+        holdTimer = nil
+        let model = rootView.model
+        guard !model.reordering, let pressed else { return }
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { model.reordering = true }
+        lift(pressed)
+        // The panel never becomes key, so Esc and clicks elsewhere only reach global monitors.
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            MainActor.assumeIsolated { self?.endReordering() }
+        }) { monitors.append(monitor) }
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.endReordering() }
+        }) { monitors.append(monitor) }
+    }
+
+    func endReordering() {
+        holdTimer?.invalidate()
+        holdTimer = nil
+        for monitor in monitors { NSEvent.removeMonitor(monitor) }
+        monitors = []
+        let model = rootView.model
+        guard model.reordering else { return }
+        if model.lifted != nil { model.onReorder(model.items.map(\.id)) }
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+            model.lifted = nil
+            model.reordering = false
+        }
+    }
+
+    private func lift(_ index: Int) {
+        let model = rootView.model
+        guard model.items.indices.contains(index) else { return }
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { model.lifted = model.items[index].id }
     }
 
     override func updateTrackingAreas() {
@@ -440,15 +535,23 @@ private final class StackHostingView: NSHostingView<StackDotsView>, NSViewToolTi
     override func mouseExited(with event: NSEvent) {
         rootView.model.hovered = nil
         rootView.model.inside = false
+        rootView.model.onHover(nil, .zero)
         NSCursor.arrow.set()
     }
 
     private func hover(_ event: NSEvent) {
         NSCursor.pointingHand.set()
         let model = rootView.model
-        let id = dotIndex(at: convert(event.locationInWindow, from: nil)).map { model.items[$0].id }
-        if model.hovered != id { model.hovered = id }
+        let index = dotIndex(at: convert(event.locationInWindow, from: nil))
+        let id = index.map { model.items[$0].id }
         if !model.inside { model.inside = true }
+        guard model.hovered != id else { return }
+        model.hovered = id
+        if let index, !model.reordering, let window {
+            model.onHover(model.items[index], window.convertToScreen(convert(dotRect(index), to: nil)))
+        } else {
+            model.onHover(nil, .zero)
+        }
     }
 
     /// Scrolling flips through the windows of the cell.
@@ -459,15 +562,6 @@ private final class StackHostingView: NSHostingView<StackDotsView>, NSViewToolTi
         guard abs(scrolled) >= 24 else { return }
         rootView.model.cycle(scrolled > 0 ? -1 : 1)
         scrolled = 0
-    }
-
-    func updateToolTips() {
-        removeAllToolTips()
-        for index in rootView.model.items.indices { addToolTip(dotRect(index), owner: self, userData: nil) }
-    }
-
-    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
-        dotIndex(at: point).map { rootView.model.items[$0].title } ?? ""
     }
 
     /// The dots are centered along the pill, `dotSize` apart.
@@ -484,6 +578,20 @@ private final class StackHostingView: NSHostingView<StackDotsView>, NSViewToolTi
     private func dotIndex(at point: NSPoint) -> Int? {
         rootView.model.items.indices.first { dotRect($0).contains(point) }
     }
+
+    /// The dot position closest to `point` along the pill, also when the pointer is past either end.
+    private func slot(at point: NSPoint) -> Int {
+        let size = rootView.dotSize
+        let count = rootView.model.items.count
+        let offset: CGFloat
+        if rootView.model.vertical {
+            let top = isFlipped ? point.y : bounds.height - point.y
+            offset = top - (bounds.height - CGFloat(count) * size) / 2
+        } else {
+            offset = point.x - (bounds.width - CGFloat(count) * size) / 2
+        }
+        return min(max(Int((offset / size).rounded(.down)), 0), count - 1)
+    }
 }
 
 /// A row of dots on a cell with more than one window, one per window. The window in front has the
@@ -497,6 +605,9 @@ final class StackIndicatorController {
     private var timer: Timer?
     private var pending: DispatchWorkItem?
     private var suspended = false
+    private let preview = StackPreviewController()
+    /// Position of each window among the dots of its cell, as the user ordered them.
+    private var order: [CGWindowID: Int] = [:]
 
     private static let dotSize: CGFloat = 14
     private static let height: CGFloat = 24
@@ -558,13 +669,23 @@ final class StackIndicatorController {
             hideAll()
             return
         }
+        // Don't pull the dots from under the pointer while one is dragged.
+        guard !panels.contains(where: { $0.model.lifted != nil }) else { return }
         let stacks = manager.stacks()
         while panels.count < stacks.count { panels.append(makePanel()) }
         let position = store.config.stackIndicatorPosition
+        let previewStyle = store.config.stackPreview
+        if previewStyle == .none { preview.hide() }
         for ((panel, view, model), stack) in zip(panels, stacks) {
-            let items = stack.windows.sorted { $0.windowID < $1.windowID }.map { window in
-                StackModel.Item(id: window.windowID, title: AX.copy(window.element, kAXTitleAttribute) as? String ?? window.bundleID ?? "Window")
-            }
+            let rank = { [order] (id: CGWindowID) in order[id] ?? Int.max }
+            let items = stack.windows
+                .sorted { (rank($0.windowID), $0.windowID) < (rank($1.windowID), $1.windowID) }
+                .map { window in
+                    StackModel.Item(id: window.windowID, title: AX.copy(window.element, kAXTitleAttribute) as? String ?? window.bundleID ?? "Window",
+                                    bundleID: window.bundleID, size: window.frame.size)
+                }
+            // Another cell's windows now: reordering was meant for the old ones.
+            if Set(items.map(\.id)) != Set(model.items.map(\.id)) { view.endReordering() }
             let windows = Dictionary(stack.windows.map { ($0.windowID, $0) }, uniquingKeysWith: { first, _ in first })
             model.onSelect = { [weak self] id in
                 guard let window = windows[id] else { return }
@@ -572,14 +693,23 @@ final class StackIndicatorController {
                 model.frontID = id
                 self?.scheduleRefresh(after: 0.3)
             }
+            model.onReorder = { [weak self] ids in
+                for (index, id) in ids.enumerated() { self?.order[id] = index }
+            }
+            model.onHover = { [weak self] item, dot in
+                guard let item, previewStyle != .none else { self?.preview.hide(); return }
+                self?.preview.show(item, near: dot, position: position, style: previewStyle)
+            }
             model.items = items
             model.frontID = stack.windows.first?.windowID
             model.vertical = position.isVertical
             panel.setFrame(NSScreen.fromAX(Self.frame(for: items.count, in: stack.cell, at: position)).integral, display: true)
-            view.updateToolTips()
             if !panel.isVisible { panel.orderFrontRegardless() }
         }
-        for (panel, _, _) in panels.dropFirst(stacks.count) { panel.orderOut(nil) }
+        for (panel, view, _) in panels.dropFirst(stacks.count) {
+            view.endReordering()
+            panel.orderOut(nil)
+        }
     }
 
     /// The pill centered on one edge of the cell, just inside it.
@@ -603,7 +733,11 @@ final class StackIndicatorController {
     }
 
     private func hideAll() {
-        for (panel, _, _) in panels { panel.orderOut(nil) }
+        preview.hide()
+        for (panel, view, _) in panels {
+            view.endReordering()
+            panel.orderOut(nil)
+        }
     }
 }
 
@@ -613,25 +747,188 @@ private struct StackDotsView: View {
 
     var body: some View {
         let stack = model.vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
-        // Clicks and tooltips are handled by StackHostingView.
-        stack {
-            ForEach(model.items) { item in
-                let front = item.id == model.frontID
-                let hovered = item.id == model.hovered
-                Circle()
-                    .fill(front ? Theme.tileTop : Color.white.opacity(hovered ? 0.9 : model.inside ? 0.65 : 0.5))
-                    .frame(width: 6, height: 6)
-                    .scaleEffect(hovered ? 1.6 : front ? 1.33 : 1)
-                    .frame(width: dotSize, height: dotSize)
+        // Clicks and hovering are handled by StackHostingView.
+        TimelineView(.animation(paused: !model.reordering)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            stack {
+                ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                    dot(item, jiggle: model.reordering && item.id != model.lifted ? jiggle(time, index) : .zero)
+                }
             }
         }
-        .scaleEffect(model.inside ? 1.06 : 1)
+        .scaleEffect(model.inside || model.reordering ? 1.06 : 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Capsule().fill(Color(hex: 0x141824, opacity: 0.6)))
+        .overlay(Capsule().strokeBorder(Theme.tileTop.opacity(model.reordering ? 0.8 : 0), lineWidth: 1.5))
         .glassSurface(cornerRadius: 12, tint: Color(hex: 0x141824, opacity: 0.55))
         .animation(.spring(response: 0.25, dampingFraction: 0.7), value: model.frontID)
         .animation(.spring(response: 0.2, dampingFraction: 0.6), value: model.hovered)
         .animation(.spring(response: 0.2, dampingFraction: 0.6), value: model.inside)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: model.reordering)
+        .environment(\.colorScheme, .dark)
+    }
+
+    private func dot(_ item: StackModel.Item, jiggle: CGSize) -> some View {
+        let front = item.id == model.frontID
+        let hovered = item.id == model.hovered
+        let lifted = item.id == model.lifted
+        let scale: CGFloat = lifted ? 2 : model.reordering ? 1.33 : hovered ? 1.6 : front ? 1.33 : 1
+        return Circle()
+            .fill(front ? Theme.tileTop : Color.white.opacity(lifted ? 1 : hovered ? 0.9 : model.inside ? 0.65 : 0.5))
+            .frame(width: 6, height: 6)
+            .scaleEffect(scale)
+            .shadow(color: .black.opacity(lifted ? 0.5 : 0), radius: 2, y: 1)
+            .offset(jiggle)
+            .frame(width: dotSize, height: dotSize)
+            .zIndex(lifted ? 1 : 0)
+    }
+
+    /// A small wobble like home screen icons that can be moved, out of step from dot to dot.
+    private func jiggle(_ time: TimeInterval, _ index: Int) -> CGSize {
+        let phase = Double(index) * 1.7
+        return CGSize(width: sin(time * 22 + phase) * 1.1, height: cos(time * 19 + phase) * 1.1)
+    }
+}
+
+// MARK: - Stack preview
+
+@MainActor
+private final class StackPreviewModel: ObservableObject {
+    @Published var title = ""
+    @Published var bundleID: String?
+    @Published var image: CGImage?
+    @Published var thumbnailSize: CGSize = .zero
+    @Published var iconOnly = false
+}
+
+/// Next to the dots, the window behind the hovered dot. As a card with its app, title and, if omw may
+/// record the screen, a thumbnail (omw never asks for Screen Recording just for this), or just its app icon.
+@MainActor
+private final class StackPreviewController {
+    private let panel = FeedbackPanel(clickThrough: true, allSpaces: false)
+    private let model = StackPreviewModel()
+    private var shownID: CGWindowID?
+    private var capture: Task<Void, Never>?
+    private var thumbnails: [CGWindowID: (image: CGImage, date: Date)] = [:]
+
+    private static let width: CGFloat = 220
+    private static let iconSize: CGFloat = 36
+    /// Room around the card for its shadow.
+    private static let margin: CGFloat = 12
+
+    init() {
+        panel.contentView = NSHostingView(rootView: StackPreviewView(model: model, margin: Self.margin))
+    }
+
+    func show(_ item: StackModel.Item, near dot: NSRect, position: StackIndicatorPosition, style: StackPreviewStyle) {
+        let iconOnly = style == .icon
+        let aspect = item.size.width > 0 ? item.size.height / item.size.width : 0.625
+        let thumbnail = CGSize(width: Self.width - 16, height: min(max((Self.width - 16) * aspect, 80), 150))
+        let content = iconOnly ? CGSize(width: Self.iconSize, height: Self.iconSize) : CGSize(width: Self.width, height: thumbnail.height + 42)
+        let size = CGSize(width: content.width + Self.margin * 2, height: content.height + Self.margin * 2)
+
+        shownID = item.id
+        model.title = item.title
+        model.bundleID = item.bundleID
+        model.thumbnailSize = thumbnail
+        model.iconOnly = iconOnly
+        let cached = thumbnails[item.id].flatMap { Date().timeIntervalSince($0.date) < 5 ? $0.image : nil }
+        model.image = cached
+
+        // Next to the pill on the side facing into the cell.
+        let gap: CGFloat = (iconOnly ? 8 : 14) - Self.margin
+        var origin: CGPoint
+        switch position {
+        case .top: origin = CGPoint(x: dot.midX - size.width / 2, y: dot.minY - gap - size.height)
+        case .bottom: origin = CGPoint(x: dot.midX - size.width / 2, y: dot.maxY + gap)
+        case .left: origin = CGPoint(x: dot.maxX + gap, y: dot.midY - size.height / 2)
+        case .right: origin = CGPoint(x: dot.minX - gap - size.width, y: dot.midY - size.height / 2)
+        }
+        if let visible = (NSScreen.screens.first { $0.frame.contains(CGPoint(x: dot.midX, y: dot.midY)) } ?? NSScreen.main)?.visibleFrame {
+            origin.x = min(max(origin.x, visible.minX), visible.maxX - size.width)
+            origin.y = min(max(origin.y, visible.minY), visible.maxY - size.height)
+        }
+        panel.setFrame(NSRect(origin: origin, size: size).integral, display: true)
+        panel.orderFrontRegardless()
+
+        guard !iconOnly, cached == nil else { return }
+        capture?.cancel()
+        let id = item.id
+        capture = Task { [weak self] in
+            guard let image = await Self.thumbnail(of: id, size: thumbnail), !Task.isCancelled, let self else { return }
+            self.thumbnails[id] = (image, Date())
+            if self.shownID == id { self.model.image = image }
+        }
+    }
+
+    func hide() {
+        capture?.cancel()
+        capture = nil
+        shownID = nil
+        panel.orderOut(nil)
+    }
+
+    /// Nil without Screen Recording access, which is only checked, never requested.
+    private static func thumbnail(of id: CGWindowID, size: CGSize) async -> CGImage? {
+        guard CGPreflightScreenCaptureAccess(),
+              let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+              let window = content.windows.first(where: { $0.windowID == id }) else { return nil }
+        let configuration = SCStreamConfiguration()
+        let scale = max(1, min(window.frame.width / size.width, window.frame.height / size.height))
+        configuration.width = Int(window.frame.width / scale * 2)
+        configuration.height = Int(window.frame.height / scale * 2)
+        configuration.showsCursor = false
+        return try? await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: window),
+                                                           configuration: configuration)
+    }
+}
+
+private struct StackPreviewView: View {
+    @ObservedObject var model: StackPreviewModel
+    let margin: CGFloat
+
+    var body: some View {
+        if model.iconOnly {
+            if let icon = AppIdentity(bundleID: model.bundleID).icon {
+                Image(nsImage: icon).resizable().frame(width: 36, height: 36)
+                    .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+                    .padding(margin)
+            }
+        } else {
+            card
+        }
+    }
+
+    private var card: some View {
+        let app = AppIdentity(bundleID: model.bundleID)
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        return VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                shape.fill(LinearGradient(colors: [Color(hex: 0x1E4FD8, opacity: 0.5), Color(hex: 0x5B2BB5, opacity: 0.5)],
+                                          startPoint: .topLeading, endPoint: .bottomTrailing))
+                if let image = model.image {
+                    Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fit)
+                } else if let icon = app.icon {
+                    Image(nsImage: icon).resizable().frame(width: 48, height: 48)
+                }
+            }
+            .frame(width: model.thumbnailSize.width, height: model.thumbnailSize.height)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(.white.opacity(0.15)))
+            HStack(spacing: 6) {
+                if let icon = app.icon { Image(nsImage: icon).resizable().frame(width: 18, height: 18) }
+                Text(model.title.isEmpty ? app.name : model.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(height: 18)
+        }
+        .padding(8)
+        .glassSurface(cornerRadius: 14, tint: Color(hex: 0x141824, opacity: 0.7))
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        .padding(margin)
         .environment(\.colorScheme, .dark)
     }
 }

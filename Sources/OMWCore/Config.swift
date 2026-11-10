@@ -13,6 +13,15 @@ public enum StackIndicatorPosition: String, Codable, CaseIterable, Sendable {
     public var isVertical: Bool { self == .left || self == .right }
 }
 
+/// What hovering one of the stacked window dots shows.
+public enum StackPreviewStyle: String, Codable, CaseIterable, Sendable {
+    /// A card with the window's thumbnail (or app icon), app icon and title.
+    case window
+    /// Just the app icon above the dot.
+    case icon
+    case none
+}
+
 /// A modifier key to hold, e.g. for resizing columns. In the order macOS shows them in shortcuts.
 public enum ModifierKey: String, Codable, CaseIterable, Sendable {
     case control, option, shift, command
@@ -66,6 +75,7 @@ public struct Config: Codable, Equatable {
     /// Dots on cells with more than one window, to bring the ones behind to the front.
     public var showStackIndicator: Bool
     public var stackIndicatorPosition: StackIndicatorPosition
+    public var stackPreview: StackPreviewStyle
     public var accent: Accent
     public var lastLayoutID: UUID?
 
@@ -97,6 +107,7 @@ public struct Config: Codable, Equatable {
         columnResizeKeys: [ModifierKey] = [.control, .option],
         showStackIndicator: Bool = true,
         stackIndicatorPosition: StackIndicatorPosition = .bottom,
+        stackPreview: StackPreviewStyle = .window,
         accent: Accent = .omw,
         lastLayoutID: UUID? = nil
     ) {
@@ -127,6 +138,7 @@ public struct Config: Codable, Equatable {
         self.columnResizeKeys = columnResizeKeys
         self.showStackIndicator = showStackIndicator
         self.stackIndicatorPosition = stackIndicatorPosition
+        self.stackPreview = stackPreview
         self.accent = accent
         self.lastLayoutID = lastLayoutID
     }
@@ -137,7 +149,7 @@ public struct Config: Codable, Equatable {
         case layouts, workspaces, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
         case moveLeftNoSwapShortcut, moveRightNoSwapShortcut, moveUpNoSwapShortcut, moveDownNoSwapShortcut
         case moveToNextDisplayShortcut, moveToPreviousDisplayShortcut, moveToNextSpaceShortcut, moveToPreviousSpaceShortcut
-        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, dragToSnap, dragFreeKey, columnResize, columnResizeKeys, showStackIndicator, stackIndicatorPosition
+        case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, dragToSnap, dragFreeKey, columnResize, columnResizeKeys, showStackIndicator, stackIndicatorPosition, stackPreview
         case accent, lastLayoutID
     }
 
@@ -180,6 +192,7 @@ public struct Config: Codable, Equatable {
         let resizeKeys = (try? c.decodeIfPresent([ModifierKey].self, forKey: .columnResizeKeys)) ?? []
         columnResizeKeys = resizeKeys.isEmpty ? d.columnResizeKeys : ModifierKey.allCases.filter(resizeKeys.contains)
         stackIndicatorPosition = (try? c.decodeIfPresent(StackIndicatorPosition.self, forKey: .stackIndicatorPosition)) ?? d.stackIndicatorPosition
+        stackPreview = (try? c.decodeIfPresent(StackPreviewStyle.self, forKey: .stackPreview)) ?? d.stackPreview
         accent = (try? c.decodeIfPresent(Accent.self, forKey: .accent)) ?? d.accent
         lastLayoutID = try c.decodeIfPresent(UUID.self, forKey: .lastLayoutID)
     }
@@ -213,6 +226,7 @@ public struct Config: Codable, Equatable {
         try c.encode(columnResizeKeys, forKey: .columnResizeKeys)
         try c.encode(showStackIndicator, forKey: .showStackIndicator)
         try c.encode(stackIndicatorPosition, forKey: .stackIndicatorPosition)
+        try c.encode(stackPreview, forKey: .stackPreview)
         try c.encode(accent, forKey: .accent)
         try c.encodeIfPresent(lastLayoutID, forKey: .lastLayoutID)
     }
