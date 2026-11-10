@@ -891,6 +891,7 @@ private struct LayoutDetail: View {
                 VStack(alignment: .leading, spacing: 2) {
                     EditableTitle(text: $layout.name)
                     Text(summary).font(.system(size: 12)).foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize()
                 }
                 Spacer()
                 Button("Delete", role: .destructive, action: onDelete)
