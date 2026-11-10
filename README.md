@@ -139,6 +139,7 @@ admin password if needed), so it stays up to date with the app.
 ```sh
 omw apply code                    # by name or ratios, like the launcher: "halves", "20/60", "1:2:1"
 omw apply 20/60/20 --display 2    # display by number (see `omw displays`) or name
+omw workspace "deep work"         # apply a workspace by name: open its apps, put them in their columns
 omw move left|right|up|down       # the focused window, like the hotkeys
 omw move left --no-swap           # leave the window that's there in place
 omw move --display next|previous
@@ -146,6 +147,7 @@ omw move --space next|previous
 omw refresh                       # place windows opened since the layout was applied
 omw undo
 omw layouts                       # name, ratios and id of every layout
+omw workspaces                    # name, displays, apps and id of every workspace
 omw displays
 omw open                          # show the launcher
 omw reload                        # re-read config.json

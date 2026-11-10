@@ -7,7 +7,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let store = ConfigStore()
     private lazy var manager = WindowManager(store: store)
-    private lazy var overlay = OverlayController(store: store, manager: manager) { [weak self] in self?.openSettings(layoutID: $0) }
+    private lazy var overlay = OverlayController(store: store, manager: manager) { [weak self] in self?.openSettings(id: $0) }
     private lazy var hud = HUDController(undo: { [weak self] in self?.manager.undo() },
                                          chooseLayout: { [weak self] in self?.overlay.show() })
     private lazy var remote = RemoteController(store: store, manager: manager, overlay: overlay)
@@ -224,10 +224,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    private func openSettings(layoutID: UUID? = nil) {
-        if let layoutID {
+    /// Opens Settings, on the page of the layout or workspace with `id` if there is one.
+    private func openSettings(id: UUID? = nil) {
+        if let id, store.workspace(id: id) != nil {
+            settingsNavigation.page = .workspaces
+            settingsNavigation.workspaceID = id
+        } else if let id {
             settingsNavigation.page = .layouts
-            settingsNavigation.layoutID = layoutID
+            settingsNavigation.layoutID = id
         }
         if settingsWindow == nil {
             let hosting = NSHostingController(rootView: SettingsView(store: store, navigation: settingsNavigation) { [weak self] in self?.applyWorkspace(id: $0) })

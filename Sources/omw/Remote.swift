@@ -57,6 +57,18 @@ final class RemoteController {
             case let .failure(error):
                 return .failure(error.message)
             }
+        case let .applyWorkspace(query):
+            guard let workspace = Workspace.find(query, in: store.config.workspaces) else {
+                return .failure("No workspace matches \u{201C}\(query)\u{201D}. See: omw workspaces")
+            }
+            switch manager.apply(workspace) {
+            case let .success((count, launched)):
+                var message = "Applied \(workspace.name) to \(count == 1 ? "1 window" : "\(count) windows")"
+                if launched > 0 { message += ", opening \(launched == 1 ? "1 app" : "\(launched) apps")" }
+                return .success(message + ".")
+            case let .failure(error):
+                return .failure(error.message)
+            }
         case let .move(move):
             return manager.perform(WindowCommand(move)).map { .failure($0.message) } ?? .success("")
         case .refresh:
@@ -68,6 +80,8 @@ final class RemoteController {
             return manager.undo().map { .failure($0.message) } ?? .success("Undid the last arrange.")
         case .layouts:
             return .success(layoutList())
+        case .workspaces:
+            return .success(workspaceList())
         case .displays:
             return .success(displayList())
         case .open:
@@ -98,6 +112,17 @@ final class RemoteController {
             [layout.name.padding(toLength: nameWidth, withPad: " ", startingAt: 0),
              layout.ratioLabel.padding(toLength: ratioWidth, withPad: " ", startingAt: 0),
              layout.id.uuidString].joined(separator: "  ")
+        }.joined(separator: "\n")
+    }
+
+    private func workspaceList() -> String {
+        let workspaces = store.config.workspaces
+        let nameWidth = workspaces.map(\.name.count).max() ?? 0
+        let summaryWidth = workspaces.map(\.summary.count).max() ?? 0
+        return workspaces.map { workspace in
+            [workspace.name.padding(toLength: nameWidth, withPad: " ", startingAt: 0),
+             workspace.summary.padding(toLength: summaryWidth, withPad: " ", startingAt: 0),
+             workspace.id.uuidString].joined(separator: "  ")
         }.joined(separator: "\n")
     }
 
