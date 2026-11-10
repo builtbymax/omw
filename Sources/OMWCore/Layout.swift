@@ -178,14 +178,18 @@ public struct Layout: Codable, Identifiable, Hashable {
     }
 
     /// Percent ratios after dragging the edge between column `boundary` and `boundary + 1`
-    /// to `position` (0…1 of the width). Snaps to `step` and keeps every column at least `step` wide.
+    /// to `position` (0…1 of the width). Snaps to `step` or to the edges of equal-width columns (e.g. thirds),
+    /// whichever is closer, and keeps every column at least `step` wide.
     public func resizedRatios(movingBoundary boundary: Int, to position: Double, step: Double = 0.05) -> [Double] {
         var percents = fractions.map { $0 * 100 }
         guard percents.indices.contains(boundary + 1) else { return percents }
         let start = percents[..<boundary].reduce(0, +)
         let end = start + percents[boundary] + percents[boundary + 1]
         let snap = step * 100
-        let edge = min(max((position * 100 / snap).rounded() * snap, start + snap), end - snap)
+        let target = position * 100
+        let equalEdges = (1..<percents.count).map { Double($0) * 100 / Double(percents.count) }
+        let snapped = ([(target / snap).rounded() * snap] + equalEdges).min { abs($0 - target) < abs($1 - target) }!
+        let edge = min(max(snapped, start + snap), end - snap)
         percents[boundary] = edge - start
         percents[boundary + 1] = end - edge
         return percents.map { ($0 * 100).rounded() / 100 }
@@ -193,26 +197,37 @@ public struct Layout: Codable, Identifiable, Hashable {
 
     public static let maxColumns = 8
 
-    /// Splits the widest column in two. Apps pinned to columns after it move along.
+    /// Whether all columns are (about) equally wide, like 50/50 or 33/33/33.
+    public var hasEqualColumns: Bool {
+        let fractions = fractions
+        return fractions.allSatisfy { abs($0 - 1 / Double(fractions.count)) < 0.005 }
+    }
+
+    /// Splits the widest column in two, or adds a column to equal columns and keeps them equal
+    /// (50/50 becomes 33/33/33). Apps pinned to columns after the new one move along.
     public func addingColumn() -> Layout {
         var percents = fractions.map { $0 * 100 }
         guard percents.count < Self.maxColumns,
               let widest = percents.indices.max(by: { percents[$0] < percents[$1] }) else { return self }
+        let equal = hasEqualColumns
         percents[widest] /= 2
         percents.insert(percents[widest], at: widest + 1)
+        if equal { percents = percents.map { _ in 100 / Double(percents.count) } }
         var counts = rowCounts
         counts.insert(1, at: widest + 1)
         return restructured(ratios: percents.map { ($0 * 100).rounded() / 100 }, rows: counts) { $0 > widest ? $0 + 1 : $0 }
     }
 
-    /// Removes a column and gives its width to the neighbour on the left (or right, for the first one).
-    /// Apps pinned to it go to that neighbour.
+    /// Removes a column and gives its width to the neighbour on the left (or right, for the first one),
+    /// or keeps equal columns equal. Apps pinned to it go to that neighbour.
     public func removingColumn(at index: Int) -> Layout {
         var percents = fractions.map { $0 * 100 }
         guard percents.count > 1, percents.indices.contains(index) else { return self }
+        let equal = hasEqualColumns
         let width = percents.remove(at: index)
         let neighbour = max(0, index - 1)
         percents[neighbour] += width
+        if equal { percents = percents.map { _ in 100 / Double(percents.count) } }
         var counts = rowCounts
         counts.remove(at: index)
         return restructured(ratios: percents.map { ($0 * 100).rounded() / 100 }, rows: counts) {
