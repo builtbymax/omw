@@ -99,6 +99,8 @@ private final class HUDModel: ObservableObject {
 
     @Published var layout: Layout?
     @Published var count = 0
+    /// What the arrange left out, shown instead of the layout name.
+    @Published var note: String?
     /// Something that didn't work, shown instead of the layout.
     @Published var notice: Notice?
     @Published var visible = false
@@ -130,9 +132,10 @@ final class HUDController {
         }
     }
 
-    func show(_ layout: Layout, count: Int, on screen: NSScreen) {
+    func show(_ layout: Layout, count: Int, note: String? = nil, on screen: NSScreen) {
         model.layout = layout
         model.count = count
+        model.note = note
         model.notice = nil
         present(on: screen)
     }
@@ -224,9 +227,16 @@ private struct HUDView: View {
                         Text(model.count == 1 ? "Arranged 1 window" : "Arranged \(model.count) windows")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white)
-                        HStack(spacing: 6) {
-                            Text(layout.name).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.55))
-                            Text(layout.ratioLabel).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.45))
+                        if let note = model.note {
+                            Label(note, systemImage: "exclamationmark.triangle.fill")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Color.orange)
+                                .lineLimit(1)
+                        } else {
+                            HStack(spacing: 6) {
+                                Text(layout.name).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.55))
+                                Text(layout.ratioLabel).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(.white.opacity(0.45))
+                            }
                         }
                     }
                     Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 26)

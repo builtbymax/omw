@@ -95,8 +95,30 @@ enum WindowCommand: String, CaseIterable, Identifiable {
 /// Private but long-stable SkyLight API (used by yabai, Amethyst): the Spaces of each display.
 @_silgen_name("CGSMainConnectionID") private func CGSMainConnectionID() -> Int32
 @_silgen_name("CGSCopyManagedDisplaySpaces") private func CGSCopyManagedDisplaySpaces(_ connection: Int32) -> CFArray
+@_silgen_name("CGSCopySpacesForWindows") private func CGSCopySpacesForWindows(_ connection: Int32, _ mask: Int32, _ windows: CFArray) -> CFArray
 
 enum Spaces {
+    /// Running apps whose windows are all on Spaces that aren't showing. Activating one makes macOS
+    /// switch to its Space, and with SIP on there's no way to bring the window over: the SkyLight move
+    /// calls are ignored for other apps' windows and a restored minimized window goes back to its Space.
+    static func appsOnlyElsewhere() -> Set<pid_t> {
+        guard let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID()) as? [[String: Any]] else { return [] }
+        let showing = Set(displays.compactMap { ($0["Current Space"] as? [String: Any])?["ManagedSpaceID"] as? Int })
+        let info = CGWindowListCopyWindowInfo(.excludeDesktopElements, kCGNullWindowID) as? [[String: Any]] ?? []
+        var here = Set<pid_t>()
+        var elsewhere = Set<pid_t>()
+        for window in info where window[kCGWindowLayer as String] as? Int == 0 {
+            guard let number = window[kCGWindowNumber as String] as? Int,
+                  let pid = (window[kCGWindowOwnerPID as String] as? Int).map(pid_t.init),
+                  // Apps keep helper windows that are on no Space at all.
+                  let spaces = CGSCopySpacesForWindows(CGSMainConnectionID(), 0x7 /* all */, [number] as CFArray) as? [Int],
+                  !spaces.isEmpty else { continue }
+            if spaces.contains(where: showing.contains) { here.insert(pid) } else { elsewhere.insert(pid) }
+        }
+        return elsewhere.subtracting(here)
+    }
+
+
     /// The Spaces of a display left to right and the one showing, nil when macOS doesn't say.
     static func of(_ screen: NSScreen) -> (spaces: [Int], current: Int)? {
         guard let uuid = CGDisplayCreateUUIDFromDisplayID(screen.displayID)?.takeRetainedValue(),

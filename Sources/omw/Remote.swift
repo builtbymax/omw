@@ -62,10 +62,14 @@ final class RemoteController {
                 return .failure("No workspace matches \u{201C}\(query)\u{201D}. See: omw workspaces")
             }
             switch manager.apply(workspace) {
-            case let .success((count, launched)):
+            case let .success((count, launched, elsewhere)):
                 var message = "Applied \(workspace.name) to \(count == 1 ? "1 window" : "\(count) windows")"
                 if launched > 0 { message += ", opening \(launched == 1 ? "1 app" : "\(launched) apps")" }
-                return .success(message + ".")
+                message += "."
+                if let note = WindowManager.elsewhereNote(elsewhere) {
+                    message += " \(note), so \(elsewhere.count == 1 ? "it stays" : "they stay") there."
+                }
+                return .success(message)
             case let .failure(error):
                 return .failure(error.message)
             }
