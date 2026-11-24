@@ -56,6 +56,9 @@ public struct Config: Codable, Equatable {
     public var moveToPreviousDisplayShortcut: Shortcut?
     public var moveToNextSpaceShortcut: Shortcut?
     public var moveToPreviousSpaceShortcut: Shortcut?
+    /// Bring the next or previous window in the focused window's cell to the front, in the order of its stack dots.
+    public var nextInStackShortcut: Shortcut?
+    public var previousInStackShortcut: Shortcut?
     /// Only active inside the launcher: switches the display a layout is applied to.
     public var switchDisplayShortcut: Shortcut?
     /// Glide windows into their columns instead of jumping.
@@ -96,6 +99,8 @@ public struct Config: Codable, Equatable {
         moveToPreviousDisplayShortcut: Shortcut? = Shortcut(string: "ctrl+opt+cmd+["),
         moveToNextSpaceShortcut: Shortcut? = Shortcut(string: "ctrl+opt+shift+right"),
         moveToPreviousSpaceShortcut: Shortcut? = Shortcut(string: "ctrl+opt+shift+left"),
+        nextInStackShortcut: Shortcut? = Shortcut(string: "ctrl+opt+tab"),
+        previousInStackShortcut: Shortcut? = Shortcut(string: "ctrl+opt+shift+tab"),
         switchDisplayShortcut: Shortcut? = Shortcut(string: "cmd+d"),
         animate: Bool = true,
         showHUD: Bool = true,
@@ -127,6 +132,8 @@ public struct Config: Codable, Equatable {
         self.moveToPreviousDisplayShortcut = moveToPreviousDisplayShortcut
         self.moveToNextSpaceShortcut = moveToNextSpaceShortcut
         self.moveToPreviousSpaceShortcut = moveToPreviousSpaceShortcut
+        self.nextInStackShortcut = nextInStackShortcut
+        self.previousInStackShortcut = previousInStackShortcut
         self.switchDisplayShortcut = switchDisplayShortcut
         self.animate = animate
         self.showHUD = showHUD
@@ -149,6 +156,7 @@ public struct Config: Codable, Equatable {
         case layouts, workspaces, gap, overlayShortcut, moveLeftShortcut, moveRightShortcut, moveUpShortcut, moveDownShortcut
         case moveLeftNoSwapShortcut, moveRightNoSwapShortcut, moveUpNoSwapShortcut, moveDownNoSwapShortcut
         case moveToNextDisplayShortcut, moveToPreviousDisplayShortcut, moveToNextSpaceShortcut, moveToPreviousSpaceShortcut
+        case nextInStackShortcut, previousInStackShortcut
         case switchDisplayShortcut, animate, showHUD, showMenuBarIcon, launcherOnPrimaryDisplay, dragToSnap, dragFreeKey, columnResize, columnResizeKeys, showStackIndicator, stackIndicatorPosition, stackPreview
         case accent, lastLayoutID
     }
@@ -179,6 +187,8 @@ public struct Config: Codable, Equatable {
         moveToPreviousDisplayShortcut = try shortcut(.moveToPreviousDisplayShortcut, d.moveToPreviousDisplayShortcut)
         moveToNextSpaceShortcut = try shortcut(.moveToNextSpaceShortcut, d.moveToNextSpaceShortcut)
         moveToPreviousSpaceShortcut = try shortcut(.moveToPreviousSpaceShortcut, d.moveToPreviousSpaceShortcut)
+        nextInStackShortcut = try shortcut(.nextInStackShortcut, d.nextInStackShortcut)
+        previousInStackShortcut = try shortcut(.previousInStackShortcut, d.previousInStackShortcut)
         switchDisplayShortcut = try shortcut(.switchDisplayShortcut, d.switchDisplayShortcut)
         animate = try c.decodeIfPresent(Bool.self, forKey: .animate) ?? d.animate
         showHUD = try c.decodeIfPresent(Bool.self, forKey: .showHUD) ?? d.showHUD
@@ -215,6 +225,8 @@ public struct Config: Codable, Equatable {
         try c.encode(moveToPreviousDisplayShortcut, forKey: .moveToPreviousDisplayShortcut)
         try c.encode(moveToNextSpaceShortcut, forKey: .moveToNextSpaceShortcut)
         try c.encode(moveToPreviousSpaceShortcut, forKey: .moveToPreviousSpaceShortcut)
+        try c.encode(nextInStackShortcut, forKey: .nextInStackShortcut)
+        try c.encode(previousInStackShortcut, forKey: .previousInStackShortcut)
         try c.encode(switchDisplayShortcut, forKey: .switchDisplayShortcut)
         try c.encode(animate, forKey: .animate)
         try c.encode(showHUD, forKey: .showHUD)

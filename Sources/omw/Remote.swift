@@ -152,6 +152,8 @@ private extension WindowCommand {
         case .previousDisplay: self = .previousDisplay
         case .nextSpace: self = .nextSpace
         case .previousSpace: self = .previousSpace
+        case .nextInStack: self = .nextInStack
+        case .previousInStack: self = .previousInStack
         }
     }
 }

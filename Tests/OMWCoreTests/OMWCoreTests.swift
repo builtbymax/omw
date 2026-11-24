@@ -478,6 +478,8 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(try RemoteCommand.parse(["move", "--no-swap", "down"]) == .move(.downNoSwap))
         #expect(try RemoteCommand.parse(["move", "--display", "next"]) == .move(.nextDisplay))
         #expect(try RemoteCommand.parse(["move", "--space", "previous"]) == .move(.previousSpace))
+        #expect(try RemoteCommand.parse(["stack", "next"]) == .move(.nextInStack))
+        #expect(try RemoteCommand.parse(["stack", "previous"]) == .move(.previousInStack))
         #expect(try RemoteCommand.parse(["undo"]) == .undo)
         #expect(try RemoteCommand.parse(["workspace", "deep", "work"]) == .applyWorkspace("deep work"))
         #expect(try RemoteCommand.parse(["workspaces"]) == .workspaces)
@@ -485,6 +487,7 @@ private let center = Layout(name: "Center", ratios: [20, 60, 20], rows: [0, 1, 0
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["apply"]) }
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["apply", "code", "--display"]) }
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["move", "sideways"]) }
+        #expect(throws: UsageError.self) { try RemoteCommand.parse(["stack"]) }
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["undo", "twice"]) }
         #expect(throws: UsageError.self) { try RemoteCommand.parse(["dance"]) }
     }
