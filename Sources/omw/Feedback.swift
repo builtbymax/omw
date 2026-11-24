@@ -686,10 +686,10 @@ final class StackIndicatorController {
         let position = store.config.stackIndicatorPosition
         let previewStyle = store.config.stackPreview
         if previewStyle == .none { preview.hide() }
+        // The keyboard way to switch, on the preview card so it can be found.
+        let hint = [store.config.previousInStackShortcut, store.config.nextInStackShortcut].compactMap { $0?.displayString }.joined(separator: " ")
         for ((panel, view, model), stack) in zip(panels, stacks) {
-            let rank = { [order] (id: CGWindowID) in order[id] ?? Int.max }
-            let items = stack.windows
-                .sorted { (rank($0.windowID), $0.windowID) < (rank($1.windowID), $1.windowID) }
+            let items = ordered(stack.windows)
                 .map { window in
                     StackModel.Item(id: window.windowID, title: AX.copy(window.element, kAXTitleAttribute) as? String ?? window.bundleID ?? "Window",
                                     bundleID: window.bundleID, size: window.frame.size)
@@ -708,7 +708,7 @@ final class StackIndicatorController {
             }
             model.onHover = { [weak self] item, dot in
                 guard let item, previewStyle != .none else { self?.preview.hide(); return }
-                self?.preview.show(item, near: dot, position: position, style: previewStyle)
+                self?.preview.show(item, near: dot, position: position, style: previewStyle, hint: hint)
             }
             model.items = items
             model.frontID = stack.windows.first?.windowID
@@ -720,6 +720,36 @@ final class StackIndicatorController {
             view.endReordering()
             panel.orderOut(nil)
         }
+    }
+
+    /// The windows in the order of their dots: as the user ordered them, else by window number.
+    private func ordered(_ windows: [ManagedWindow]) -> [ManagedWindow] {
+        let rank = { [order] (id: CGWindowID) in order[id] ?? Int.max }
+        return windows.sorted { (rank($0.windowID), $0.windowID) < (rank($1.windowID), $1.windowID) }
+    }
+
+    /// Brings the window `delta` dots away from the focused one to the front, wrapping around. Works
+    /// with the dots turned off too, then in their default order.
+    func cycle(by delta: Int) -> ActionError? {
+        guard AX.isTrusted else {
+            AX.requestTrust()
+            return .notTrusted
+        }
+        guard let focused = AX.focusedManagedWindow(), let screen = AX.screen(containing: focused.frame) else { return .noFocusedWindow }
+        guard manager.hasLayout(on: screen) else { return .noLayout(display: screen.displayID) }
+        guard let stack = manager.stacks().first(where: { $0.windows.contains { $0.windowID == focused.windowID } }) else {
+            return .notStacked
+        }
+        let windows = ordered(stack.windows)
+        guard let index = windows.firstIndex(where: { $0.windowID == focused.windowID }) else { return .notStacked }
+        let target = windows[(index + delta % windows.count + windows.count) % windows.count]
+        AX.raise(target)
+        // The dot moves right away instead of on the next refresh.
+        for (_, _, model) in panels where model.items.contains(where: { $0.id == target.windowID }) {
+            model.frontID = target.windowID
+        }
+        scheduleRefresh(after: 0.3)
+        return nil
     }
 
     /// The pill centered on one edge of the cell, just inside it.
@@ -809,6 +839,8 @@ private final class StackPreviewModel: ObservableObject {
     @Published var image: CGImage?
     @Published var thumbnailSize: CGSize = .zero
     @Published var iconOnly = false
+    /// The shortcuts to switch windows, empty when there are none.
+    @Published var hint = ""
 }
 
 /// Next to the dots, the window behind the hovered dot. As a card with its app, title and, if omw may
@@ -830,7 +862,7 @@ private final class StackPreviewController {
         panel.contentView = NSHostingView(rootView: StackPreviewView(model: model, margin: Self.margin))
     }
 
-    func show(_ item: StackModel.Item, near dot: NSRect, position: StackIndicatorPosition, style: StackPreviewStyle) {
+    func show(_ item: StackModel.Item, near dot: NSRect, position: StackIndicatorPosition, style: StackPreviewStyle, hint: String) {
         let iconOnly = style == .icon
         let aspect = item.size.width > 0 ? item.size.height / item.size.width : 0.625
         let thumbnail = CGSize(width: Self.width - 16, height: min(max((Self.width - 16) * aspect, 80), 150))
@@ -842,6 +874,7 @@ private final class StackPreviewController {
         model.bundleID = item.bundleID
         model.thumbnailSize = thumbnail
         model.iconOnly = iconOnly
+        model.hint = hint
         let cached = thumbnails[item.id].flatMap { Date().timeIntervalSince($0.date) < 5 ? $0.image : nil }
         model.image = cached
 
@@ -932,6 +965,13 @@ private struct StackPreviewView: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if !model.hint.isEmpty {
+                    Spacer(minLength: 4)
+                    Text(model.hint)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .fixedSize()
+                }
             }
             .frame(height: 18)
         }

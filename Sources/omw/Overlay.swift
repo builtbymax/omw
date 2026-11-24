@@ -466,7 +466,7 @@ final class OverlayController: NSObject, NSWindowDelegate {
         commands += WindowCommand.allCases.map { command in
             OverlayItem(id: command.rawValue, title: command.title, keys: config[keyPath: command.keyPath]?.displayKeys ?? [],
                         section: .commands, icon: .tile(command.style), detail: command.detail,
-                        actionTitle: "Move Window") { [weak self] in self?.manager.perform(command) }
+                        actionTitle: command.actionTitle) { [weak self] in self?.manager.perform(command) }
         }
         commands.append(OverlayItem(id: "refresh", title: "Refresh Layout", section: .commands, icon: .tile(.refresh),
                                     detail: "Places windows opened since the layout was applied. Windows already in the layout stay put.",

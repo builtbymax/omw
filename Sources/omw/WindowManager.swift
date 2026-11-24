@@ -5,7 +5,7 @@ import OMWCore
 enum ActionError: Error {
     case notTrusted, noDisplay, noFocusedWindow, edge, singleDisplay, noNewWindows, nothingToUndo
     case noSpace, spaceShortcutOff(right: Bool), noLayout(display: CGDirectDisplayID)
-    case emptyWorkspace, noWorkspaceDisplay
+    case emptyWorkspace, noWorkspaceDisplay, notStacked
 
     var message: String {
         switch self {
@@ -20,6 +20,7 @@ enum ActionError: Error {
         case .noLayout: "No layout is applied on this workspace yet."
         case .emptyWorkspace: "The workspace has no apps pinned yet."
         case .noWorkspaceDisplay: "None of the workspace's displays are connected."
+        case .notStacked: "No other window shares a cell with the focused window."
         case let .spaceShortcutOff(right):
             "The Mission Control shortcut \u{201C}Move \(right ? "right" : "left") a space\u{201D} is turned off in System Settings → Keyboard → Keyboard Shortcuts."
         }
@@ -49,6 +50,8 @@ final class WindowManager {
     var onArranged: ((Layout, Int, NSScreen, String?) -> Void)?
     /// Called whenever omw moved windows, so the stack dots can catch up.
     var onWindowsMoved: (() -> Void)?
+    /// Brings the window `delta` dots away from the focused one to the front. The stack dots own their order.
+    var cycleStack: ((Int) -> ActionError?)?
 
     init(store: ConfigStore) {
         self.store = store
@@ -291,6 +294,8 @@ final class WindowManager {
         case .previousDisplay: moveFocusedToDisplay(by: -1)
         case .nextSpace: moveFocusedToSpace(by: 1)
         case .previousSpace: moveFocusedToSpace(by: -1)
+        case .nextInStack: cycleStack?(1) ?? .notStacked
+        case .previousInStack: cycleStack?(-1) ?? .notStacked
         }
     }
 

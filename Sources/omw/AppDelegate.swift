@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         manager.onWindowsMoved = { [weak self] in self?.stackIndicator.scheduleRefresh() }
+        manager.cycleStack = { [weak self] delta in self?.stackIndicator.cycle(by: delta) }
         dragTracker.onDragging = { [weak self] dragging in
             guard let self else { return }
             self.draggingWindow = dragging
@@ -80,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         dragTracker.onMouseUp = { [weak self] in self?.stackIndicator.scheduleRefresh(after: 0.15) }
         store.$config
-            .map { ($0.showStackIndicator, $0.stackIndicatorPosition) }
+            .map { ($0.showStackIndicator, $0.stackIndicatorPosition, $0.nextInStackShortcut, $0.previousInStackShortcut) }
             .removeDuplicates(by: ==)
             .sink { [weak self] _ in self?.stackIndicator.scheduleRefresh(after: 0) }
             .store(in: &subscriptions)
@@ -116,9 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func perform(_ command: WindowCommand) {
-        if case let .noLayout(display) = manager.perform(command),
-           let screen = NSScreen.screens.first(where: { $0.displayID == display }) {
-            showNoLayout(on: screen)
+        switch manager.perform(command) {
+        case let .noLayout(display):
+            if let screen = NSScreen.screens.first(where: { $0.displayID == display }) { showNoLayout(on: screen) }
+        case .notStacked:
+            NSSound.beep()
+        default:
+            break
         }
     }
 

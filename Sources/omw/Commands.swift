@@ -8,6 +8,7 @@ enum WindowCommand: String, CaseIterable, Identifiable {
     case moveLeftNoSwap, moveRightNoSwap, moveUpNoSwap, moveDownNoSwap
     case nextDisplay, previousDisplay
     case nextSpace, previousSpace
+    case nextInStack, previousInStack
 
     var id: String { rawValue }
 
@@ -25,6 +26,8 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         case .previousDisplay: "Move Window to Previous Display"
         case .nextSpace: "Move Window to Next Workspace"
         case .previousSpace: "Move Window to Previous Workspace"
+        case .nextInStack: "Show Next Window in Stack"
+        case .previousInStack: "Show Previous Window in Stack"
         }
     }
 
@@ -42,6 +45,8 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         case .previousDisplay: "Moves the focused window to the matching column on the display to the left."
         case .nextSpace: "Moves the focused window to the desktop on the right. Uses the Mission Control shortcut \u{201C}Move right a space\u{201D} (⌃→)."
         case .previousSpace: "Moves the focused window to the desktop on the left. Uses the Mission Control shortcut \u{201C}Move left a space\u{201D} (⌃←)."
+        case .nextInStack: "Brings the next window in the focused window's cell to the front, in the order of the stack dots."
+        case .previousInStack: "Brings the previous window in the focused window's cell to the front, in the order of the stack dots."
         }
     }
 
@@ -53,6 +58,7 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         case .moveUpNoSwap, .moveDownNoSwap: .slideVertical
         case .nextDisplay, .previousDisplay: .display
         case .nextSpace, .previousSpace: .spaces
+        case .nextInStack, .previousInStack: .stack
         }
     }
 
@@ -71,6 +77,8 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         case .previousDisplay: "arrow.left.to.line"
         case .nextSpace: "rectangle.righthalf.inset.filled.arrow.right"
         case .previousSpace: "rectangle.lefthalf.inset.filled.arrow.left"
+        case .nextInStack: "chevron.forward.circle"
+        case .previousInStack: "chevron.backward.circle"
         }
     }
 
@@ -88,6 +96,16 @@ enum WindowCommand: String, CaseIterable, Identifiable {
         case .previousDisplay: \.moveToPreviousDisplayShortcut
         case .nextSpace: \.moveToNextSpaceShortcut
         case .previousSpace: \.moveToPreviousSpaceShortcut
+        case .nextInStack: \.nextInStackShortcut
+        case .previousInStack: \.previousInStackShortcut
+        }
+    }
+
+    /// The launcher's button.
+    var actionTitle: String {
+        switch self {
+        case .nextInStack, .previousInStack: "Show Window"
+        default: "Move Window"
         }
     }
 }

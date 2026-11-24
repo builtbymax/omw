@@ -24,6 +24,7 @@ public enum RemoteCommand: Codable, Equatable, Sendable {
       move left|right|up|down [--no-swap]        Move the focused window to the neighbouring cell
       move --display next|previous               Move the focused window to another display
       move --space next|previous                 Move the focused window to another workspace
+      stack next|previous                        Bring the next/previous window in the focused window's cell to the front
       refresh                                    Place windows opened since the layout was applied
       undo                                       Undo the last arrange
       layouts                                    List layouts
@@ -61,6 +62,12 @@ public enum RemoteCommand: Codable, Equatable, Sendable {
             return .applyWorkspace(workspace)
         case "move":
             return .move(try WindowMove.parse(rest))
+        case "stack":
+            switch rest {
+            case ["next"]: return .move(.nextInStack)
+            case ["previous"]: return .move(.previousInStack)
+            default: throw UsageError("Try: omw stack next|previous")
+            }
         case "refresh", "undo", "layouts", "workspaces", "displays", "open", "reload":
             guard rest.isEmpty else { throw UsageError("\(name) takes no arguments.") }
             switch name {
@@ -92,6 +99,8 @@ public enum WindowMove: String, Codable, CaseIterable, Sendable {
     case leftNoSwap, rightNoSwap, upNoSwap, downNoSwap
     case nextDisplay, previousDisplay
     case nextSpace, previousSpace
+    /// `omw stack next|previous`: switches the window in front instead of moving one.
+    case nextInStack, previousInStack
 
     static func parse(_ arguments: [String]) throws -> WindowMove {
         switch arguments {
